@@ -67,6 +67,9 @@ export default function RegisterScreen() {
       return;
     }
 
+    setLoading(true);
+    setError("");
+
     try {
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
       await useAuthStore.getState().register(email.trim(), password, fullName);

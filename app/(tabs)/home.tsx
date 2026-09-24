@@ -11,7 +11,6 @@ import {
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Circle, Path } from "react-native-svg";
 import {
   Bell,
   X,
@@ -28,7 +27,7 @@ import { useAuth } from "../../hooks/useAuth";
 export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { summary, refreshAll, isSyncing } = usePoints();
+  const { summary, categories, expiringAccounts, refreshAll, isSyncing } = usePoints();
   const [refreshing, setRefreshing] = useState(false);
   const [showTooltip, setShowTooltip] = useState(true);
 
@@ -39,17 +38,30 @@ export default function HomeScreen() {
     setTimeout(() => setRefreshing(false), 500);
   };
 
-  const displayName = user?.name || "Davinder singh";
-  const avatarUrl =
-    user?.avatarUrl ||
-    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80";
+  const displayName =
+    user?.name || (user?.email ? user.email.split("@")[0] : "Guest");
+  const avatarUrl = user?.avatarUrl;
+  const avatarInitial = displayName.charAt(0).toUpperCase();
+
+  // Accounts whose points expire within the 30-day dashboard window
+  const soonExpiring = expiringAccounts.filter((acc) => {
+    if (!acc.expiryDate) return true;
+    const t = new Date(acc.expiryDate).getTime();
+    return !isNaN(t) && t <= Date.now() + 30 * 24 * 60 * 60 * 1000;
+  });
+
+  // Real brand counts per category for the quick-nav cards
+  const categoryBrandCounts: Record<string, number> = {};
+  categories.forEach((c) => {
+    categoryBrandCounts[c.categoryId] = c.brandCount;
+  });
 
   // Categories data matching design cards
   const categoriesList = [
     {
       id: "banking",
       name: "Banking & Cards",
-      subtext: "3 brands",
+      subtext: `${categoryBrandCounts["banking"] ?? 0} brands`,
       bgColor: "#F0FDFE",
       borderColor: "#D8F3F8",
       iconBg: "#38BDF8",
@@ -59,7 +71,7 @@ export default function HomeScreen() {
     {
       id: "airlines",
       name: "Airlines",
-      subtext: "2 brands",
+      subtext: `${categoryBrandCounts["airlines"] ?? 0} brands`,
       bgColor: "#FAF5FF",
       borderColor: "#F3E8FF",
       iconBg: "#A855F7",
@@ -69,7 +81,7 @@ export default function HomeScreen() {
     {
       id: "shopping",
       name: "Shopping",
-      subtext: "3 brands",
+      subtext: `${categoryBrandCounts["shopping"] ?? 0} brands`,
       bgColor: "#F0FDFA",
       borderColor: "#CCFBF1",
       iconBg: "#2DD4BF",
@@ -79,7 +91,7 @@ export default function HomeScreen() {
     {
       id: "hotels",
       name: "Hotels",
-      subtext: "2 brands",
+      subtext: `${categoryBrandCounts["hotels"] ?? 0} brands`,
       bgColor: "#FFFBEB",
       borderColor: "#FEF3C7",
       iconBg: "#F59E0B",
@@ -122,12 +134,21 @@ export default function HomeScreen() {
             <View className="flex-row items-center justify-between mb-8 pt-2">
               <View className="flex-row items-center">
                 {/* User Avatar */}
-                <View className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/30 mr-3 shadow-sm bg-slate-700">
-                  <Image
-                    source={{ uri: avatarUrl }}
-                    className="w-full h-full"
-                    resizeMode="cover"
-                  />
+                <View className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/30 mr-3 shadow-sm bg-slate-700 items-center justify-center">
+                  {avatarUrl ? (
+                    <Image
+                      source={{ uri: avatarUrl }}
+                      className="w-full h-full"
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                      className="text-white text-lg"
+                    >
+                      {avatarInitial}
+                    </Text>
+                  )}
                 </View>
 
                 <View>
@@ -315,127 +336,68 @@ export default function HomeScreen() {
 
           {/* Expiry Cards List */}
           <View className="mb-6">
-            {/* Card 1 */}
-            <TouchableOpacity
-              onPress={() => router.push("/category/airlines")}
-              activeOpacity={0.85}
-              className="bg-white rounded-2xl p-4 mb-3 border border-slate-200/60 shadow-sm flex-row items-center justify-between"
-            >
-              <View className="flex-row items-center flex-1 mr-2">
-                <View className="w-11 h-11 rounded-xl bg-sky-50 items-center justify-center mr-3 border border-sky-100">
-                  <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-                    <Circle cx={12} cy={12} r={10} fill="#EF4444" fillOpacity={0.15} />
-                    <Path
-                      d="M12 5L16 14L12 12L8 14L12 5Z"
-                      fill="#EF4444"
-                    />
-                    <Circle cx={12} cy={16} r={1.5} fill="#EF4444" />
-                  </Svg>
-                </View>
-                <View>
+            {soonExpiring.length > 0 ? (
+              soonExpiring.slice(0, 3).map((acc) => (
+                <TouchableOpacity
+                  key={acc.id}
+                  onPress={() => router.push(`/category/${acc.program.category}`)}
+                  activeOpacity={0.85}
+                  className="bg-white rounded-2xl p-4 mb-3 border border-slate-200/60 shadow-sm flex-row items-center justify-between"
+                >
+                  <View className="flex-row items-center flex-1 mr-2">
+                    <View
+                      style={{ backgroundColor: `${acc.program.accentColor}22` }}
+                      className="w-11 h-11 rounded-xl items-center justify-center mr-3 border border-slate-100"
+                    >
+                      <Text className="text-lg">{acc.program.logoInitial}</Text>
+                    </View>
+                    <View className="flex-1">
+                      <Text
+                        style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                        className="text-[15px] text-slate-900"
+                      >
+                        {acc.program.name}
+                      </Text>
+                      <Text
+                        style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                        className="text-[12.5px] text-slate-500 mt-0.5"
+                      >
+                        {acc.expiringPoints.toLocaleString()} pts expire{" "}
+                        {acc.expiryDate && !isNaN(new Date(acc.expiryDate).getTime())
+                          ? new Date(acc.expiryDate).toLocaleDateString("en-GB", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })
+                          : "soon"}
+                      </Text>
+                    </View>
+                  </View>
+
                   <Text
                     style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                    className="text-[15px] text-slate-900"
+                    className="text-[17px] text-slate-900"
                   >
-                    InterMills airline
+                    {acc.currentBalance.toLocaleString()}
                   </Text>
-                  <Text
-                    style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                    className="text-[12.5px] text-slate-500 mt-0.5"
-                  >
-                    2,500 pts expire 18 Aug 2026
-                  </Text>
-                </View>
+                </TouchableOpacity>
+              ))
+            ) : (
+              <View className="bg-white rounded-2xl p-5 border border-slate-200/60 shadow-sm items-center">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
+                  className="text-sm text-slate-900 mb-1"
+                >
+                  No points expiring soon
+                </Text>
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                  className="text-xs text-slate-500 text-center"
+                >
+                  Link a program or run a Gmail sync to see expiry alerts here.
+                </Text>
               </View>
-
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-[17px] text-slate-900"
-              >
-                11,450
-              </Text>
-            </TouchableOpacity>
-
-            {/* Card 2 */}
-            <TouchableOpacity
-              onPress={() => router.push("/category/airlines")}
-              activeOpacity={0.85}
-              className="bg-white rounded-2xl p-4 mb-3 border border-slate-200/60 shadow-sm flex-row items-center justify-between"
-            >
-              <View className="flex-row items-center flex-1 mr-2">
-                <View className="w-11 h-11 rounded-xl bg-sky-50 items-center justify-center mr-3 border border-sky-100">
-                  <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-                    <Circle cx={12} cy={12} r={10} fill="#0284C7" fillOpacity={0.15} />
-                    <Path
-                      d="M12 6L17 15L12 13L7 15L12 6Z"
-                      fill="#0284C7"
-                    />
-                  </Svg>
-                </View>
-                <View>
-                  <Text
-                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                    className="text-[15px] text-slate-900"
-                  >
-                    InterMills airline
-                  </Text>
-                  <Text
-                    style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                    className="text-[12.5px] text-slate-500 mt-0.5"
-                  >
-                    2,500 pts expire 18 Aug 2026
-                  </Text>
-                </View>
-              </View>
-
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-[17px] text-slate-900"
-              >
-                15,450
-              </Text>
-            </TouchableOpacity>
-
-            {/* Card 3 */}
-            <TouchableOpacity
-              onPress={() => router.push("/category/airlines")}
-              activeOpacity={0.85}
-              className="bg-white rounded-2xl p-4 mb-3 border border-slate-200/60 shadow-sm flex-row items-center justify-between"
-            >
-              <View className="flex-row items-center flex-1 mr-2">
-                <View className="w-11 h-11 rounded-xl bg-sky-50 items-center justify-center mr-3 border border-sky-100">
-                  <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-                    <Circle cx={12} cy={12} r={10} fill="#EF4444" fillOpacity={0.15} />
-                    <Path
-                      d="M12 5L16 14L12 12L8 14L12 5Z"
-                      fill="#EF4444"
-                    />
-                    <Circle cx={12} cy={16} r={1.5} fill="#EF4444" />
-                  </Svg>
-                </View>
-                <View>
-                  <Text
-                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                    className="text-[15px] text-slate-900"
-                  >
-                    InterMills airline
-                  </Text>
-                  <Text
-                    style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                    className="text-[12.5px] text-slate-500 mt-0.5"
-                  >
-                    2,500 pts expire 18 Aug 2026
-                  </Text>
-                </View>
-              </View>
-
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-[17px] text-slate-900"
-              >
-                11,450
-              </Text>
-            </TouchableOpacity>
+            )}
           </View>
 
           {/* ─── Section 2: Points by category ────────────────────────── */}

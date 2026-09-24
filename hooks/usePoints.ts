@@ -1,6 +1,6 @@
 import { usePointsStore } from "../store/pointsStore";
 import { useAuthStore } from "../store/authStore";
-import { initialNotifications, NotificationItem } from "../lib/db";
+import { NotificationItem } from "../types/models";
 
 export function usePoints() {
   const user = useAuthStore((state) => state.user);
@@ -40,7 +40,7 @@ export function usePoints() {
     coupons,
     activeCoupons,
     expiringCoupons,
-    notifications: initialNotifications as NotificationItem[],
+    notifications: [] as NotificationItem[],
     categories: categorySummaries,
     expiringAccounts,
 

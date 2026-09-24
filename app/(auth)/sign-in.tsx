@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -398,7 +399,10 @@ export default function SignInScreen() {
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.replace("/(tabs)/home");
+                Alert.alert(
+                  "Coming soon",
+                  "Google sign-in isn't available yet. Please sign in with your email and password."
+                );
               }}
               activeOpacity={0.8}
               style={{
@@ -430,7 +434,10 @@ export default function SignInScreen() {
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.replace("/(tabs)/home");
+                Alert.alert(
+                  "Coming soon",
+                  "Apple sign-in isn't available yet. Please sign in with your email and password."
+                );
               }}
               activeOpacity={0.8}
               style={{

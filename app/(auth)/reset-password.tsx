@@ -46,6 +46,16 @@ export default function ResetPasswordScreen() {
     setLoading(true);
     setError("");
 
+    // Password reset has no backend yet – never fake a success in production.
+    if (!__DEV__) {
+      setLoading(false);
+      setError(
+        "Password reset by email isn't available yet. Please contact support to reset your password."
+      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      return;
+    }
+
     setTimeout(() => {
       setLoading(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

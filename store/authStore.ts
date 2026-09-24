@@ -1,6 +1,6 @@
 // store/authStore.ts – Authentication Zustand state slice
 import { create } from "zustand";
-import { UserProfile } from "../lib/db";
+import { UserProfile } from "../types/models";
 import { apiClient } from "../lib/apiClient";
 
 interface AuthState {

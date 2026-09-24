@@ -29,6 +29,16 @@ export default function ForgotPasswordScreen() {
       return;
     }
 
+    // The OTP email flow is simulated end-to-end (no mail backend yet).
+    // Never present a fake success to production users.
+    if (!__DEV__) {
+      setError(
+        "Password reset by email isn't available yet. Please contact support to reset your password."
+      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      return;
+    }
+
     setLoading(true);
     setError("");
 

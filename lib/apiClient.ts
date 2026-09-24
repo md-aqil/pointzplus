@@ -88,6 +88,13 @@ class ApiClient {
     }
   }
 
+  /** Permanently delete the signed-in user's account and all linked data. */
+  async deleteCurrentUser() {
+    return this.request<{ message: string }>('/auth/account', {
+      method: 'DELETE',
+    });
+  }
+
   async getProfile() {
     return this.request<any>('/auth/profile');
   }

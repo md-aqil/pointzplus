@@ -2,7 +2,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import { Gift, AlertTriangle, ArrowDownLeft, ArrowUpRight } from "lucide-react-native";
-import { NotificationItem } from "../../lib/db";
+import { NotificationItem } from "../../types/models";
 
 interface NotificationCardProps {
   notification: NotificationItem;

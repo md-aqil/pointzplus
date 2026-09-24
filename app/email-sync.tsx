@@ -224,9 +224,7 @@ export default function EmailSyncScreen() {
 
           <TouchableOpacity
             onPress={() =>
-              handleStartSync(
-                gmailAccount?.email || user?.email || "user@gmail.com"
-              )
+              handleStartSync(gmailAccount?.email || user?.email || "")
             }
             disabled={isSyncing}
             className="w-full bg-primary-dark py-3.5 rounded-xl items-center flex-row justify-center shadow-sm"

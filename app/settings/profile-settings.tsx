@@ -16,6 +16,7 @@ import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
 import { useAuth } from "../../hooks/useAuth";
+import { apiClient } from "../../lib/apiClient";
 
 export default function ProfileSettingsScreen() {
   const router = useRouter();
@@ -28,17 +29,30 @@ export default function ProfileSettingsScreen() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (password && password !== confirmPassword) {
+      Alert.alert("Mismatch", "Passwords do not match.");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+
     setSaving(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    setTimeout(() => {
+    try {
+      await apiClient.updateProfile({ fullName: name, phoneNumber: phone });
       updateProfile({ name, phone });
       setSaving(false);
       Alert.alert("Success", "Profile updated successfully!", [
         { text: "OK", onPress: () => router.back() },
       ]);
-    }, 600);
+    } catch (err) {
+      setSaving(false);
+      Alert.alert(
+        "Save failed",
+        "We couldn't save your profile. Please check your connection and try again."
+      );
+    }
   };
 
   return (

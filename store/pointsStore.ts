@@ -80,150 +80,11 @@ function mapCoupon(raw: any): ExtractedCoupon {
   };
 }
 
-const DEFAULT_SEED_ACCOUNTS: LinkedAccount[] = [
-  {
-    id: "acc_seed_1",
-    programId: "intermills",
-    program: POPULAR_PROGRAMS.find((p) => p.id === "intermills") || {
-      id: "intermills",
-      name: "InterMills airline",
-      category: "airlines",
-      logoInitial: "✈️",
-      accentColor: "#01A2FB",
-      defaultExpiryMonths: 18,
-      pointValueINR: 0.35,
-    },
-    accountNumberMasked: "IM-***892",
-    currentBalance: 11450,
-    expiringPoints: 2500,
-    expiryDate: "18 Aug 2026",
-    lastSyncedAt: new Date().toISOString(),
-    syncMethod: "email_parser",
-    isActive: true,
-  },
-  {
-    id: "acc_seed_2",
-    programId: "air_india",
-    program: POPULAR_PROGRAMS.find((p) => p.id === "air_india") || {
-      id: "air_india",
-      name: "InterMills airline",
-      category: "airlines",
-      logoInitial: "✈️",
-      accentColor: "#01A2FB",
-      defaultExpiryMonths: 24,
-      pointValueINR: 0.45,
-    },
-    accountNumberMasked: "AI-***401",
-    currentBalance: 15450,
-    expiringPoints: 2500,
-    expiryDate: "18 Aug 2026",
-    lastSyncedAt: new Date().toISOString(),
-    syncMethod: "email_parser",
-    isActive: true,
-  },
-  {
-    id: "acc_seed_3",
-    programId: "marriott_bonvoy",
-    program: POPULAR_PROGRAMS.find((p) => p.id === "marriott_bonvoy") || {
-      id: "marriott_bonvoy",
-      name: "InterMills airline",
-      category: "hotels",
-      logoInitial: "🏨",
-      accentColor: "#9C4EBD",
-      defaultExpiryMonths: 24,
-      pointValueINR: 0.70,
-    },
-    accountNumberMasked: "MB-***772",
-    currentBalance: 11450,
-    expiringPoints: 0,
-    expiryDate: "18 Aug 2026",
-    lastSyncedAt: new Date().toISOString(),
-    syncMethod: "email_parser",
-    isActive: true,
-  },
-  {
-    id: "acc_seed_4",
-    programId: "hdfc_mycards",
-    program: POPULAR_PROGRAMS.find((p) => p.id === "hdfc_mycards") || {
-      id: "hdfc_mycards",
-      name: "HDFC Regalia Points",
-      category: "banking",
-      logoInitial: "💳",
-      accentColor: "#004C8F",
-      defaultExpiryMonths: 24,
-      pointValueINR: 0.50,
-    },
-    accountNumberMasked: "HDFC-***551",
-    currentBalance: 2087,
-    expiringPoints: 0,
-    expiryDate: null,
-    lastSyncedAt: new Date().toISOString(),
-    syncMethod: "email_parser",
-    isActive: true,
-  },
-];
-
-const DEFAULT_TRANSACTIONS: PointsTransaction[] = [
-  {
-    id: "tx_1",
-    accountId: "acc_seed_1",
-    type: "credit",
-    points: 697,
-    description: "Monthly rewards statement auto-sync",
-    date: new Date().toISOString(),
-  },
-];
-
-const DEFAULT_SEED_COUPONS: ExtractedCoupon[] = [
-  {
-    id: "cpn_seed_1",
-    merchantName: "Swiggy",
-    category: "dining",
-    couponCode: "SWIGGYIT20",
-    couponType: "discount_code",
-    title: "Flat 20% OFF at Swiggy",
-    description: "Extracted from Gmail — gourmet weekend voucher",
-    discountValue: "20% OFF",
-    minimumSpendINR: 299,
-    expiryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-    isUsed: false,
-    confidenceScore: 0.98,
-  },
-  {
-    id: "cpn_seed_2",
-    merchantName: "Air India",
-    category: "airlines",
-    couponCode: "AIR500OFF",
-    couponType: "discount_code",
-    title: "₹500 Off Domestic Flights",
-    description: "Flying Returns member perk from statement email",
-    discountValue: "₹500 OFF",
-    minimumSpendINR: 2500,
-    expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    isUsed: false,
-    confidenceScore: 0.96,
-  },
-  {
-    id: "cpn_seed_3",
-    merchantName: "Flipkart",
-    category: "shopping",
-    couponCode: "SUPERCOIN250",
-    couponType: "discount_code",
-    title: "₹250 Voucher with SuperCoins",
-    description: "Redeemable on Fashion, Electronics, and Home",
-    discountValue: "₹250 Voucher",
-    minimumSpendINR: 999,
-    expiryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    isUsed: false,
-    confidenceScore: 0.99,
-  },
-];
-
 export const usePointsStore = create<PointsState>((set, get) => ({
-  accounts: DEFAULT_SEED_ACCOUNTS,
+  accounts: [],
   emailAccounts: [],
-  transactions: DEFAULT_TRANSACTIONS,
-  coupons: DEFAULT_SEED_COUPONS,
+  transactions: [],
+  coupons: [],
   isSyncing: false,
   syncProgress: { step: "Ready", percent: 0 },
 
@@ -239,17 +100,26 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       0
     );
 
-    const monthlyEarned = 697;
-    const monthlyRedeemed = 0;
+    const now = new Date();
+    const inCurrentMonth = (iso: string) => {
+      const d = new Date(iso);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    };
+    const monthlyEarned = transactions
+      .filter((t) => t.type === "credit" && inCurrentMonth(t.date))
+      .reduce((sum, t) => sum + (t.points || 0), 0);
+    const monthlyRedeemed = transactions
+      .filter((t) => (t.type === "debit" || t.type === "redeemed") && inCurrentMonth(t.date))
+      .reduce((sum, t) => sum + (t.points || 0), 0);
 
     const activeCouponsCount = get().coupons.filter((c) => !c.isUsed).length;
 
     return {
-      totalPoints: totalPoints || 40437,
-      monthlyEarned: monthlyEarned || 697,
+      totalPoints,
+      monthlyEarned,
       monthlyRedeemed,
-      expiringThisMonth: expiringThisMonth || 5000,
-      portfolioValueINR: Math.round(portfolioValueINR) || 15287,
+      expiringThisMonth,
+      portfolioValueINR: Math.round(portfolioValueINR),
       linkedAccountsCount: active.length,
       activeCouponsCount,
     };
@@ -341,7 +211,7 @@ export const usePointsStore = create<PointsState>((set, get) => ({
           };
         });
 
-        set({ accounts: formatted.length > 0 ? formatted : get().accounts });
+        set({ accounts: formatted });
       }
     } catch {
       // Offline or unauthenticated fallback
@@ -351,11 +221,11 @@ export const usePointsStore = create<PointsState>((set, get) => ({
   fetchCouponsFromBackend: async () => {
     try {
       const rows = await apiClient.getCoupons();
-      if (Array.isArray(rows) && rows.length > 0) {
+      if (Array.isArray(rows)) {
         set({ coupons: rows.map(mapCoupon) });
       }
     } catch {
-      // Keep seed / local coupons
+      // Keep the current cache on network errors
     }
   },
 
@@ -491,7 +361,9 @@ export const usePointsStore = create<PointsState>((set, get) => ({
           syncedCoupons = scanRes.coupons.map(mapCoupon);
         }
         handleProgress("Normalizing extracted balances & coupons...", 85);
-      } catch {
+      } catch (scanError) {
+        // Simulated local sync is a dev-only fallback; production must never fabricate data.
+        if (!__DEV__) throw scanError;
         const local = await EmailSyncService.executeEmailSync(provider, email, handleProgress);
         syncedAccounts = local.linkedAccounts;
         syncedCoupons = local.extractedCoupons;

@@ -20,6 +20,7 @@ import * as Haptics from "expo-haptics";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { Button } from "../../components/ui/Button";
 import { useAuth } from "../../hooks/useAuth";
+import { apiClient } from "../../lib/apiClient";
 
 const REASONS = [
   "Missing programs or features I need",
@@ -49,11 +50,19 @@ export default function DeleteAccountScreen() {
           style: "destructive",
           onPress: async () => {
             setLoading(true);
-            setTimeout(async () => {
+            try {
+              await apiClient.deleteCurrentUser();
+            } catch (err) {
               setLoading(false);
-              await signOut();
-              router.replace("/(auth)/sign-in");
-            }, 1000);
+              Alert.alert(
+                "Deletion failed",
+                "We couldn't delete your account. Please try again or contact support."
+              );
+              return;
+            }
+            setLoading(false);
+            await signOut();
+            router.replace("/(auth)/sign-in");
           },
         },
       ]

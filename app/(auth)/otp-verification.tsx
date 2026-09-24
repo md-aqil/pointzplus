@@ -25,6 +25,9 @@ export default function OtpVerificationScreen() {
   const [countdown, setCountdown] = useState(20);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(
+    "Incorrect code. Please try again."
+  );
   const [attempts, setAttempts] = useState(0);
 
   useEffect(() => {
@@ -37,7 +40,18 @@ export default function OtpVerificationScreen() {
   const handleVerifyOtp = () => {
     if (otp.length < 6) {
       setError(true);
+      setErrorMessage("Incorrect code. Please try again.");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+
+    // Simulated verification – production builds must not pretend to succeed.
+    if (!__DEV__) {
+      setError(true);
+      setErrorMessage(
+        "Password reset by email isn't available yet. Please contact support to reset your password."
+      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       return;
     }
 
@@ -46,15 +60,9 @@ export default function OtpVerificationScreen() {
 
     setTimeout(() => {
       setLoading(false);
-      // Demo: code 123456 or any 6 digits succeeds
-      if (otp === "000000") {
-        setError(true);
-        setAttempts((prev) => prev + 1);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      } else {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        router.push("/(auth)/reset-password");
-      }
+      // Dev demo: any 6-digit code advances the flow.
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.push("/(auth)/reset-password");
     }, 800);
   };
 
@@ -108,7 +116,10 @@ export default function OtpVerificationScreen() {
             value={otp}
             onChange={(val) => {
               setOtp(val);
-              if (error) setError(false);
+              if (error) {
+                setError(false);
+                setErrorMessage("Incorrect code. Please try again.");
+              }
             }}
             error={error}
           />
@@ -129,7 +140,7 @@ export default function OtpVerificationScreen() {
                 style={{ fontFamily: "PlusJakartaSans-Regular" }}
                 className="text-xs text-alert leading-relaxed"
               >
-                Incorrect code. Please try again (Attempt {attempts + 1} of 5).
+                {errorMessage} (Attempt {attempts + 1} of 5).
               </Text>
             </View>
           )}

@@ -3,7 +3,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { query } from '../db.js';
-import { JWT_SECRET } from '../middleware/auth.js';
+import { authenticate, JWT_SECRET } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -195,6 +195,24 @@ router.put('/profile', async (req, res) => {
 // Logout (client-side token removal, but we can track it)
 router.post('/logout', async (req, res) => {
   res.json({ message: 'Logged out successfully' });
+});
+
+// Permanently delete the authenticated user's account.
+// All user-owned tables reference users(id) ON DELETE CASCADE, so a single
+// delete removes accounts, coupons, sync jobs, alerts, settings and history.
+router.delete('/account', authenticate, async (req, res) => {
+  try {
+    const result = await query('DELETE FROM users WHERE id = $1 RETURNING id', [
+      req.userId,
+    ]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ message: 'Account deleted successfully' });
+  } catch (err) {
+    console.error('Delete account error:', err);
+    res.status(500).json({ error: 'Failed to delete account' });
+  }
 });
 
 export default router;

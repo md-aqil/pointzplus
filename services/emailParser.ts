@@ -283,6 +283,11 @@ export class EmailSyncService {
     userEmail: string,
     onProgress: (step: string, percent: number) => void
   ): Promise<SyncExecutionResult> {
+    // Simulated sync parses bundled sample emails – never expose that in production.
+    if (!__DEV__) {
+      throw new Error("Simulated email sync is only available in development builds.");
+    }
+
     // Step 1: Authenticate OAuth Token
     onProgress("Authenticating with Google Gmail OAuth...", 20);
     await new Promise((r) => setTimeout(r, 500));
