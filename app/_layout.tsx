@@ -14,9 +14,38 @@ import {
   PlusJakartaSans_700Bold,
   PlusJakartaSans_800ExtraBold,
 } from "@expo-google-fonts/plus-jakarta-sans";
+import { apiClient } from "../lib/apiClient";
+import { useAuthStore } from "../store/authStore";
 
 // Keep splash screen visible while loading fonts
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Restore the persisted JWT on startup and re-validate it against the server.
+async function restoreSession() {
+  try {
+    const token = await apiClient.restoreToken();
+    if (!token) return;
+    const res = await apiClient.verifyToken(); // clears token if invalid/expired
+    if (res?.user) {
+      const u = res.user;
+      useAuthStore.setState({
+        token,
+        isAuthenticated: true,
+        user: {
+          id: u.id,
+          name: u.full_name || u.name || u.email,
+          email: u.email,
+          phone: u.phone_number || u.phone || "",
+          totalPoints: 0,
+          monthlyEarned: 0,
+          expiringSoon: 0,
+        },
+      });
+    }
+  } catch {
+    // Non-fatal: user simply starts unauthenticated
+  }
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +70,11 @@ export default function RootLayout() {
       SplashScreen.hideAsync().catch(() => {});
     }
   }, [fontsLoaded, fontError]);
+
+  // Re-validate persisted session on every cold start
+  useEffect(() => {
+    restoreSession();
+  }, []);
 
   if (!fontsLoaded && !fontError) {
     return null;

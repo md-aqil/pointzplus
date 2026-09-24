@@ -1,18 +1,36 @@
 // lib/apiClient.ts – Local PostgreSQL API Client
+import * as SecureStore from 'expo-secure-store';
 import { useAuthStore } from '../store/authStore';
 
 // Local server URL (defaults to localhost:3001 for web & simulator)
 const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001/api';
+
+const TOKEN_STORAGE_KEY = 'pointzplus_auth_token';
 
 class ApiClient {
   private token: string | null = null;
 
   setToken(token: string) {
     this.token = token;
+    // Persist so sessions survive app restarts (in-memory tokens are lost on kill)
+    SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token).catch(() => {});
   }
 
   clearToken() {
     this.token = null;
+    SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
+  }
+
+  /** Load the persisted token into memory (call once on app startup). */
+  async restoreToken(): Promise<string | null> {
+    if (this.token) return this.token;
+    try {
+      const stored = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
+      if (stored) this.token = stored;
+      return this.token;
+    } catch {
+      return null;
+    }
   }
 
   private async request<T>(
@@ -220,12 +238,12 @@ class ApiClient {
   }
 
   // ─── Analytics ──────────────────────────────────────
-  async getPortfolioSummary(userId: string) {
-    return this.request<any>(`/analytics/portfolio/${userId}`);
+  async getPortfolioSummary() {
+    return this.request<any>('/analytics/portfolio');
   }
 
-  async getExpiringAlerts(userId: string) {
-    return this.request<any[]>(`/alerts/expiring/${userId}`);
+  async getExpiringAlerts() {
+    return this.request<any[]>('/alerts/expiring');
   }
 
   // ─── Notifications ─────────────────────────────────

@@ -34,37 +34,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   setUser: (user) => set({ user, isAuthenticated: !!user }),
   setRememberMe: (rememberMe) => set({ rememberMe }),
 
-  signIn: async (email, password = "password123", fullName) => {
+  signIn: async (email, password, fullName) => {
+    if (!password) {
+      throw new Error("Password is required");
+    }
     set({ isLoading: true });
     try {
-      // Try backend authentication
-      try {
-        const res = await apiClient.login(email, password);
-        const u = res.user;
-        const profile: UserProfile = {
-          id: u.id,
-          name: u.name || fullName || formatNameFromEmail(email),
-          email: u.email,
-          phone: u.phone || "",
-          totalPoints: 0,
-          monthlyEarned: 0,
-          expiringSoon: 0,
-        };
-        set({ user: profile, token: res.token, isAuthenticated: true, isLoading: false });
-        return;
-      } catch (backendErr) {
-        // Fallback for direct local / development login
-        const profile: UserProfile = {
-          id: `usr_${Date.now()}`,
-          name: fullName || formatNameFromEmail(email),
-          email: email,
-          phone: "",
-          totalPoints: 0,
-          monthlyEarned: 0,
-          expiringSoon: 0,
-        };
-        set({ user: profile, isAuthenticated: true, isLoading: false });
-      }
+      const res = await apiClient.login(email, password);
+      const u = res.user;
+      const profile: UserProfile = {
+        id: u.id,
+        name: u.name || fullName || formatNameFromEmail(email),
+        email: u.email,
+        phone: u.phone || "",
+        totalPoints: 0,
+        monthlyEarned: 0,
+        expiringSoon: 0,
+      };
+      set({ user: profile, token: res.token, isAuthenticated: true, isLoading: false });
     } finally {
       set({ isLoading: false });
     }
@@ -73,31 +60,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (email, password, fullName, phone = "") => {
     set({ isLoading: true });
     try {
-      try {
-        const res = await apiClient.register(email, password, fullName, phone);
-        const u = res.user;
-        const profile: UserProfile = {
-          id: u.id,
-          name: u.name || fullName,
-          email: u.email,
-          phone: u.phone || phone,
-          totalPoints: 0,
-          monthlyEarned: 0,
-          expiringSoon: 0,
-        };
-        set({ user: profile, token: res.token, isAuthenticated: true, isLoading: false });
-      } catch (backendErr) {
-        const profile: UserProfile = {
-          id: `usr_${Date.now()}`,
-          name: fullName || formatNameFromEmail(email),
-          email: email,
-          phone: phone,
-          totalPoints: 0,
-          monthlyEarned: 0,
-          expiringSoon: 0,
-        };
-        set({ user: profile, isAuthenticated: true, isLoading: false });
-      }
+      const res = await apiClient.register(email, password, fullName, phone);
+      const u = res.user;
+      const profile: UserProfile = {
+        id: u.id,
+        name: u.name || fullName,
+        email: u.email,
+        phone: u.phone || phone,
+        totalPoints: 0,
+        monthlyEarned: 0,
+        expiringSoon: 0,
+      };
+      set({ user: profile, token: res.token, isAuthenticated: true, isLoading: false });
     } finally {
       set({ isLoading: false });
     }

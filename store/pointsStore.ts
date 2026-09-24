@@ -18,6 +18,7 @@ interface PointsState {
   accounts: LinkedAccount[];
   emailAccounts: EmailSyncAccount[];
   transactions: PointsTransaction[];
+  coupons: ExtractedCoupon[];
   isSyncing: boolean;
   syncProgress: { step: string; percent: number };
 
@@ -315,7 +316,8 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       const backendAccounts = await apiClient.getAccounts();
       if (Array.isArray(backendAccounts)) {
         const formatted: LinkedAccount[] = backendAccounts.map((a: any) => {
-          const catalogProgram = POPULAR_PROGRAMS.find((p) => p.id === a.program_id) || {
+          const catalogProgram =
+            POPULAR_PROGRAMS.find((p) => p.id === (a.program_slug ?? a.program_id)) || {
             id: a.program_id,
             name: a.program_name || "Loyalty Program",
             category: a.category || "shopping",
@@ -461,15 +463,16 @@ export const usePointsStore = create<PointsState>((set, get) => ({
         const scanRes = await apiClient.scanEmails(provider, true);
         if (scanRes?.accounts?.length) {
           syncedAccounts = scanRes.accounts.map((a: any) => {
-            const prog = POPULAR_PROGRAMS.find((p) => p.id === a.program_id) || {
-              id: a.program_id,
-              name: a.program_name || "Loyalty Program",
-              category: (a.category || "airlines") as LoyaltyCategory,
-              logoInitial: a.logo_initial || "✈️",
-              accentColor: a.accent_color || "#01A2FB",
-              defaultExpiryMonths: 24,
-              pointValueINR: parseFloat(a.point_value_inr) || 0.35,
-            };
+            const prog =
+              POPULAR_PROGRAMS.find((p) => p.id === (a.program_slug ?? a.program_id)) || {
+                id: a.program_id,
+                name: a.program_name || "Loyalty Program",
+                category: (a.category || "airlines") as LoyaltyCategory,
+                logoInitial: a.logo_initial || "✈️",
+                accentColor: a.accent_color || "#01A2FB",
+                defaultExpiryMonths: 24,
+                pointValueINR: parseFloat(a.point_value_inr) || 0.35,
+              };
             return {
               id: a.id,
               programId: a.program_id,

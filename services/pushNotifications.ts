@@ -1,9 +1,31 @@
-// services/pushNotifications.ts – Expo Push Notifications & Firebase Cloud Messaging
+// services/pushNotifications.ts – Expo Push Notifications (backed by local PostgreSQL API)
 import * as ExpoNotifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import { supabase } from '../lib/supabase';
-import { useAuthStore } from '../store/authStore';
+import * as SecureStore from 'expo-secure-store';
+import { apiClient } from '../lib/apiClient';
+
+// Local dedup ledger so we don't re-notify for the same account+tier on every app open
+const SENT_ALERTS_KEY = 'pointzplus_sent_expiry_alerts';
+
+async function getSentAlerts(): Promise<Record<string, string>> {
+  try {
+    const raw = await SecureStore.getItemAsync(SENT_ALERTS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function markAlertSent(key: string): Promise<void> {
+  try {
+    const current = await getSentAlerts();
+    current[key] = new Date().toISOString();
+    await SecureStore.setItemAsync(SENT_ALERTS_KEY, JSON.stringify(current));
+  } catch {
+    // Non-fatal
+  }
+}
 
 // Configure notification behavior
 ExpoNotifications.setNotificationHandler({
@@ -72,24 +94,15 @@ export async function registerForPushNotifications(): Promise<string | null> {
   const pushToken = await ExpoNotifications.getExpoPushTokenAsync();
   console.log('Push token obtained:', pushToken.data);
 
-  // Save push token to Supabase
+  // Save push token via the local API
   await savePushToken(pushToken.data);
 
   return pushToken.data;
 }
 
 async function savePushToken(token: string) {
-  const { user } = useAuthStore.getState();
-  if (!user?.id) return;
-
   try {
-    await supabase
-      .from('push_notification_settings')
-      .upsert({
-        user_id: user.id,
-        push_token: token,
-        last_token_refresh_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+    await apiClient.registerPushToken(token);
   } catch (error) {
     console.error('Error saving push token:', error);
   }
@@ -166,63 +179,36 @@ export async function notifySpecialOffer(
 
 // Check and trigger expiry alerts (run on app open/background sync)
 export async function checkAndTriggerExpiryAlerts() {
-  const { user } = useAuthStore.getState();
-  if (!user?.id) return;
-
   try {
-    // Get accounts with expiring points
-    const { data: expiringAccounts } = await supabase
-      .from('linked_accounts')
-      .select(`
-        id,
-        program_id,
-        programs:loyalty_programs(name),
-        current_balance,
-        expiring_points,
-        expiry_date
-      `)
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .gt('expiring_points', 0)
-      .lte('expiry_date', new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString());
+    // Accounts with points expiring within 90 days (from local PostgreSQL API)
+    const expiringAccounts = await apiClient.getExpiryAlerts();
+    if (!Array.isArray(expiringAccounts) || expiringAccounts.length === 0) return;
 
-    if (!expiringAccounts) return;
+    const sentAlerts = await getSentAlerts();
 
     for (const account of expiringAccounts) {
       const daysUntilExpiry = Math.ceil(
         (new Date(account.expiry_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
       );
 
-      // Check if we should alert (15, 30, 45, 90 days)
+      // Bucketed thresholds: smallest of 15/30/45/90 that is >= daysUntil,
+      // so alerts fire on any day (exact-match checks almost never fired).
       const alertDays = [15, 30, 45, 90];
-      if (alertDays.includes(daysUntilExpiry)) {
-        // Check if we already sent this alert
-        const { data: existingAlert } = await supabase
-          .from('expiry_alerts')
-          .select('id')
-          .eq('linked_account_id', account.id)
-          .eq('alert_type', `${daysUntilExpiry}days`)
-          .gte('triggered_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-          .single();
+      const tier = alertDays.find((t) => daysUntilExpiry <= t);
+      if (!tier) continue;
 
-        if (!existingAlert) {
-          await scheduleExpiryAlert(
-            (account as any).programs?.name || (account as any).program?.name || 'Loyalty Program',
-            account.expiring_points,
-            account.expiry_date,
-            daysUntilExpiry
-          );
+      const dedupKey = `expiry:${account.id}:${tier}days`;
+      if (sentAlerts[dedupKey]) continue;
 
-          // Log alert in database
-          await supabase.from('expiry_alerts').insert({
-            user_id: user.id,
-            linked_account_id: account.id,
-            alert_type: `${daysUntilExpiry}days`,
-            points_at_risk: account.expiring_points,
-            sent_push_notification: true,
-          });
-        }
-      }
+      await scheduleExpiryAlert(
+        account.program_name || 'Loyalty Program',
+        account.expiring_points,
+        account.expiry_date,
+        daysUntilExpiry
+      );
+      await markAlertSent(dedupKey);
+      // The server-side cron (/api/notifications/check-expiry) records the
+      // expiry_alerts row; the client only schedules the local notification.
     }
   } catch (error) {
     console.error('Error checking expiry alerts:', error);
@@ -241,19 +227,11 @@ export function setupNotificationResponseHandler(
   });
 }
 
-// Get notification settings from Supabase
+// Get notification settings from the local API
 export async function getNotificationSettings(): Promise<PushNotificationSettings> {
-  const { user } = useAuthStore.getState();
-  if (!user?.id) return DEFAULT_SETTINGS;
-
   try {
-    const { data, error } = await supabase
-      .from('push_notification_settings')
-      .select('*')
-      .eq('user_id', user.id)
-      .single();
-
-    if (error || !data) return DEFAULT_SETTINGS;
+    const data = await apiClient.getNotificationSettings();
+    if (!data) return DEFAULT_SETTINGS;
 
     return {
       expiryAlertsEnabled: data.expiry_alerts_enabled ?? true,
@@ -268,17 +246,8 @@ export async function getNotificationSettings(): Promise<PushNotificationSetting
 
 // Update notification settings
 export async function updateNotificationSettings(settings: Partial<PushNotificationSettings>) {
-  const { user } = useAuthStore.getState();
-  if (!user?.id) return;
-
   try {
-    await supabase
-      .from('push_notification_settings')
-      .upsert({
-        user_id: user.id,
-        ...settings,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+    await apiClient.updateNotificationSettings(settings);
   } catch (error) {
     console.error('Error updating notification settings:', error);
   }

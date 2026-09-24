@@ -4,6 +4,7 @@
     "slug": "pointzplus-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "pointzplus",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
@@ -25,7 +26,8 @@
       "expo-router",
       "expo-splash-screen",
       "expo-status-bar",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-notifications"
     ]
   }
 }

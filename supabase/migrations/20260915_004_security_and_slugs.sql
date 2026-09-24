@@ -27,7 +27,7 @@ UPDATE public.loyalty_programs SET slug = CASE name
   WHEN 'Marriott Bonvoy'               THEN 'marriott_bonvoy'
   WHEN 'Hilton Honors'                 THEN 'hilton_honors'
   WHEN 'Taj Epicure'                   THEN 'taj_epicure'
-  WHEN 'Accor Live Limitless'          THEN 'accor_live_limitless'
+  WHEN 'Accor Live Limitless'          THEN 'accor_all'
   -- Banking & Cards
   WHEN 'HDFC Regalia Points'           THEN 'hdfc_mycards'
   WHEN 'SBI Card Reward Points'        THEN 'sbi_rewardz'
@@ -37,13 +37,13 @@ UPDATE public.loyalty_programs SET slug = CASE name
   -- Shopping & Retail
   WHEN 'Flipkart SuperCoins'           THEN 'flipkart_supercoins'
   WHEN 'Amazon Pay Rewards'            THEN 'amazon_pay_rewards'
-  WHEN 'Reliance R-One'                THEN 'reliance_rone'
+  WHEN 'Reliance R-One'                THEN 'reliance_one'
   -- Food & Dining
   WHEN 'Swiggy One Points'             THEN 'swiggy_one'
   WHEN 'Zomato Gold'                   THEN 'zomato_gold'
   WHEN 'Dominos Payback'               THEN 'dominos_payback'
   -- Fuel
-  WHEN 'IndianOil XTRAREWARDS'         THEN 'indianoil_xtra'
+  WHEN 'IndianOil XTRAREWARDS'         THEN 'iocl_xtrarewards'
   WHEN 'BPCL SmartDrive'               THEN 'bpcl_smartdrive'
   -- Entertainment
   WHEN 'BookMyShow Rewards'            THEN 'bookmyshow'

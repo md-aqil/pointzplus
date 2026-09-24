@@ -78,14 +78,17 @@ router.post('/token', authenticate, async (req, res) => {
   try {
     const { pushToken } = req.body;
 
+    // Upsert: the settings row may not exist yet (first token before settings read)
     await query(`
-      UPDATE push_notification_settings 
-      SET push_token = $1, last_token_refresh_at = NOW(), updated_at = NOW()
-      WHERE user_id = $2
-    `, [pushToken, req.userId]);
+      INSERT INTO push_notification_settings (user_id, push_token, last_token_refresh_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (user_id)
+      DO UPDATE SET push_token = $2, last_token_refresh_at = NOW(), updated_at = NOW()
+    `, [req.userId, pushToken]);
 
     res.json({ success: true });
   } catch (err) {
+    console.error('Save push token error:', err);
     res.status(500).json({ error: 'Failed to save token' });
   }
 });
