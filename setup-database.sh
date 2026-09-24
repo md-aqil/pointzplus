@@ -27,6 +27,10 @@ echo "Seeding programs..."
 psql -d pointzplus -f supabase/migrations/20260915_002_seed_programs.sql
 
 echo ""
+echo "Adding coupons, tokens, and sync jobs..."
+psql -d pointzplus -f supabase/migrations/20260915_003_coupons_and_sync_jobs.sql
+
+echo ""
 echo "=== Database Setup Complete ==="
 echo ""
 echo "Next steps:"

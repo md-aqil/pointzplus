@@ -142,16 +142,16 @@ export default function ProfileScreen() {
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                router.push("/add-account");
+                router.push("/email-sync");
               }}
               className="flex-1 bg-light-bg py-2.5 rounded-xl flex-row items-center justify-center border border-border-light"
             >
-              <Plus size={14} color="#01A2FB" className="mr-1.5" />
+              <Mail size={14} color="#01A2FB" className="mr-1.5" />
               <Text
                 style={{ fontFamily: "PlusJakartaSans-Bold" }}
                 className="text-xs text-primary-dark ml-1"
               >
-                Add Program
+                Sync Gmail
               </Text>
             </TouchableOpacity>
 
@@ -181,14 +181,14 @@ export default function ProfileScreen() {
         </Text>
 
         <View className="bg-white rounded-3xl border border-border-light overflow-hidden shadow-sm mb-5">
-          {/* Email Sync Status */}
+          {/* Gmail Sync Status */}
           <TouchableOpacity
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               router.push("/email-sync");
             }}
             activeOpacity={0.7}
-            className="flex-row items-center justify-between p-4 border-b border-border-light/60"
+            className="flex-row items-center justify-between p-4"
           >
             <View className="flex-row items-center flex-1">
               <View
@@ -208,15 +208,15 @@ export default function ProfileScreen() {
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
                   className="text-sm text-dark"
                 >
-                  Email Auto-Sync
+                  Gmail Auto-Sync
                 </Text>
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Regular" }}
                   className="text-xs text-dark-muted"
                 >
                   {emailAccounts.length > 0
-                    ? `Connected via ${emailAccounts[0].provider}`
-                    : "Not connected"}
+                    ? `Connected (${emailAccounts[0].email})`
+                    : "Auto-extract points from Gmail statements"}
                 </Text>
               </View>
             </View>
@@ -236,38 +236,6 @@ export default function ProfileScreen() {
               size={18}
               color={emailAccounts.length > 0 ? "#059669" : "#9C9BA2"}
             />
-          </TouchableOpacity>
-
-          {/* Manual Add Programs */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/add-account");
-            }}
-            activeOpacity={0.7}
-            className="flex-row items-center justify-between p-4"
-          >
-            <View className="flex-row items-center flex-1">
-              <View className="w-10 h-10 rounded-xl bg-light-bg items-center justify-center mr-3 border border-border-light">
-                <Plus size={18} color="#070617" />
-              </View>
-              <View className="flex-1">
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-sm text-dark"
-                >
-                  Manual Add Program
-                </Text>
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                  className="text-xs text-dark-muted"
-                >
-                  Add programs manually or scan statements
-                </Text>
-              </View>
-            </View>
-
-            <ChevronRight size={18} color="#9C9BA2" />
           </TouchableOpacity>
         </View>
 

@@ -42,7 +42,7 @@ export default function SplashScreen() {
 
       {/* Exact Penpot Background Gradients and Ambient Glows */}
       <Svg
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         width={SCREEN_WIDTH}
         height={SCREEN_HEIGHT}
         viewBox="0 0 393 852"

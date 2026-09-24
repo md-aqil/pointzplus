@@ -1,29 +1,15 @@
 // server/routes/sms.js – Android SMS Detection API
 import express from 'express';
-import jwt from 'jsonwebtoken';
 import { query } from '../db.js';
+import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'pointzplus-secret-key-2026';
-
-const authenticate = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.userId;
-    next();
-  } catch {
-    res.status(401).json({ error: 'Invalid token' });
-  }
-};
 
 // SMS Parser rules (same as mobile app)
 const SMS_RULES = [
   { programId: 'hdfc_mycards', keywords: ['HDFCBANK', 'HDFC'], balanceRegex: /(?:Reward Points|Points Balance)\s*(?:is|are)?\s*([0-9,]+)/i },
   { programId: 'airtel_thanks', keywords: ['AIRTEL', 'THANKS'], balanceRegex: /(?:SuperCoins|points|balance)\s*(?:is|are)?\s*([0-9,]+)/i },
-  { programId: 'flipkart_supercoins', keywords: ['FLIPKART', 'SUPERCOINS'], balanceRegex: /(?:SuperCoins|points|balance)\s*(?:is|are)?\s*([0,9,]+)/i },
+  { programId: 'flipkart_supercoins', keywords: ['FLIPKART', 'SUPERCOINS'], balanceRegex: /(?:SuperCoins|points|balance)\s*(?:is|are)?\s*([0-9,]+)/i },
   { programId: 'swiggy_one', keywords: ['SWIGGY'], balanceRegex: /(?:SuperCoins|points)\s*([0-9,]+)/i },
   { programId: 'cult_fit', keywords: ['CULTFIT', 'CULT'], balanceRegex: /(?:FitCoins|points)\s*([0-9,]+)/i },
   { programId: 'bookmyshow', keywords: ['BOOKMYSHOW', 'BMS'], balanceRegex: /(?:Rewards|points)\s*([0-9,]+)/i },
@@ -54,9 +40,9 @@ router.post('/detect', authenticate, async (req, res) => {
         const points = parseInt(match[1].replace(/,/g, ''), 10);
         if (isNaN(points) || points <= 0) continue;
 
-        // Get program details
+        // Get program details (SMS rules use canonical slugs, not UUIDs)
         const programResult = await query(
-          'SELECT id, name, category, point_value_inr FROM loyalty_programs WHERE id = $1',
+          'SELECT id, name, category, point_value_inr FROM loyalty_programs WHERE slug = $1',
           [rule.programId]
         );
 

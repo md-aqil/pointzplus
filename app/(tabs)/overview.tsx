@@ -146,7 +146,7 @@ export default function OverviewScreen() {
                 <View className="w-full bg-border-light h-2 rounded-full overflow-hidden">
                   <View
                     style={{ 
-                      width: `${percentage}%`, 
+                      width: `${percentage}%` as any, 
                       backgroundColor: cat.accentColor 
                     }}
                     className="h-full rounded-full"

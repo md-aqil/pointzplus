@@ -207,7 +207,7 @@ export async function checkAndTriggerExpiryAlerts() {
 
         if (!existingAlert) {
           await scheduleExpiryAlert(
-            account.programs?.name || 'Loyalty Program',
+            (account as any).programs?.name || (account as any).program?.name || 'Loyalty Program',
             account.expiring_points,
             account.expiry_date,
             daysUntilExpiry

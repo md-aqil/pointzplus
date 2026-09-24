@@ -1,4 +1,4 @@
-// app/email-sync.tsx – Gmail & Outlook OAuth Auto-Sync Screen
+// app/email-sync.tsx – Google Gmail OAuth Auto-Sync Screen
 import React, { useState } from "react";
 import {
   View,
@@ -16,9 +16,7 @@ import {
   ShieldCheck,
   RefreshCw,
   CheckCircle2,
-  Sparkles,
   Lock,
-  ChevronRight,
   Zap,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
@@ -28,26 +26,24 @@ import { useAuth } from "../hooks/useAuth";
 export default function EmailSyncScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { emailAccounts, syncEmail, isSyncing, syncProgress } = usePoints();
-  const [activeProvider, setActiveProvider] = useState<"gmail" | "outlook" | null>(null);
+  const { emailAccounts, syncEmail, isSyncing, syncProgress, expiringCoupons, activeCoupons } = usePoints();
   const [syncSuccessModal, setSyncSuccessModal] = useState(false);
   const [syncedCount, setSyncedCount] = useState(0);
+  const [couponCount, setCouponCount] = useState(0);
 
   const gmailAccount = emailAccounts.find((e) => e.provider === "gmail");
-  const outlookAccount = emailAccounts.find((e) => e.provider === "outlook");
 
-  const handleStartSync = async (provider: "gmail" | "outlook", email: string) => {
+  const handleStartSync = async (email: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setActiveProvider(provider);
     try {
-      const results = await syncEmail(provider, email);
+      const results = await syncEmail("gmail", email);
       setSyncedCount(results.length);
+      // coupons should already be fetched/updated into Zustand
+      setCouponCount(activeCoupons.length);
       setSyncSuccessModal(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) {
-      alert("Failed to sync emails. Please try again.");
-    } finally {
-      setActiveProvider(null);
+      alert("Failed to extract data from Gmail. Please try again.");
     }
   };
 
@@ -69,7 +65,7 @@ export default function EmailSyncScreen() {
           style={{ fontFamily: "PlusJakartaSans-Bold" }}
           className="text-lg text-dark"
         >
-          Email Auto-Sync
+          Gmail Auto-Sync
         </Text>
 
         <View className="w-10" />
@@ -90,7 +86,7 @@ export default function EmailSyncScreen() {
               style={{ fontFamily: "PlusJakartaSans-Bold" }}
               className="text-xs text-primary uppercase tracking-wider"
             >
-              Zero Manual Effort
+              Automated Gmail Extraction
             </Text>
           </View>
 
@@ -105,7 +101,7 @@ export default function EmailSyncScreen() {
             style={{ fontFamily: "PlusJakartaSans-Regular" }}
             className="text-xs text-white/70 leading-4 mb-4"
           >
-            Connect your mailbox via secure OAuth. PointzPlus scans for official e-statements from 20+ airlines, hotels & banks and keeps your balances updated automatically.
+            Connect your Gmail via Google OAuth. PointzPlus automatically scans for official e-statements from airlines, hotels, banking rewards & retail brands to keep your portfolio up to date.
           </Text>
 
           <View className="flex-row items-center bg-white/10 px-3 py-2 rounded-xl">
@@ -114,7 +110,7 @@ export default function EmailSyncScreen() {
               style={{ fontFamily: "PlusJakartaSans-Medium" }}
               className="text-[11px] text-white/90 ml-2"
             >
-              Read-only statement access. Personal emails are ignored.
+              Read-only statement access. Personal emails are never read.
             </Text>
           </View>
         </View>
@@ -129,7 +125,7 @@ export default function EmailSyncScreen() {
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
                   className="text-sm text-dark"
                 >
-                  Sync in Progress...
+                  Syncing Gmail Statements...
                 </Text>
               </View>
               <Text
@@ -157,20 +153,19 @@ export default function EmailSyncScreen() {
           </View>
         )}
 
-        {/* Provider Cards */}
+        {/* Gmail Connection Card */}
         <Text
           style={{ fontFamily: "PlusJakartaSans-Bold" }}
           className="text-sm text-dark uppercase tracking-wider mb-3 ml-1"
         >
-          Connected Accounts
+          Gmail Mailbox
         </Text>
 
-        {/* Gmail Card */}
-        <View className="bg-white rounded-2xl p-4 mb-4 border border-border-light shadow-sm">
-          <View className="flex-row items-center justify-between mb-3">
+        <View className="bg-white rounded-2xl p-5 mb-5 border border-border-light shadow-sm">
+          <View className="flex-row items-center justify-between mb-4">
             <View className="flex-row items-center">
-              <View className="w-11 h-11 rounded-xl bg-red-50 items-center justify-center mr-3 border border-red-100">
-                <Text className="text-xl">✉️</Text>
+              <View className="w-12 h-12 rounded-2xl bg-red-50 items-center justify-center mr-3 border border-red-100">
+                <Text className="text-2xl">✉️</Text>
               </View>
               <View>
                 <Text
@@ -183,7 +178,7 @@ export default function EmailSyncScreen() {
                   style={{ fontFamily: "PlusJakartaSans-Regular" }}
                   className="text-xs text-dark-muted"
                 >
-                  {gmailAccount ? gmailAccount.email : "Not connected"}
+                  {gmailAccount ? gmailAccount.email : "Connect your primary Gmail inbox"}
                 </Text>
               </View>
             </View>
@@ -211,18 +206,18 @@ export default function EmailSyncScreen() {
           </View>
 
           {gmailAccount && (
-            <View className="bg-light-bg p-3 rounded-xl mb-3 flex-row items-center justify-between">
+            <View className="bg-light-bg p-3.5 rounded-xl mb-4 flex-row items-center justify-between">
               <Text
                 style={{ fontFamily: "PlusJakartaSans-Medium" }}
                 className="text-xs text-dark-muted"
               >
-                Discovered Programs
+                Extracted Programs
               </Text>
               <Text
                 style={{ fontFamily: "PlusJakartaSans-Bold" }}
                 className="text-xs text-dark"
               >
-                {gmailAccount.programsFound} Active
+                {gmailAccount.programsFound} Active Programs
               </Text>
             </View>
           )}
@@ -230,101 +225,29 @@ export default function EmailSyncScreen() {
           <TouchableOpacity
             onPress={() =>
               handleStartSync(
-                "gmail",
                 gmailAccount?.email || user?.email || "user@gmail.com"
               )
             }
             disabled={isSyncing}
-            className="w-full bg-primary-dark py-3 rounded-xl items-center flex-row justify-center shadow-sm"
+            className="w-full bg-primary-dark py-3.5 rounded-xl items-center flex-row justify-center shadow-sm"
           >
-            {isSyncing && activeProvider === "gmail" ? (
+            {isSyncing ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
               <>
-                <RefreshCw size={15} color="#FFFFFF" className="mr-2" />
+                <RefreshCw size={16} color="#FFFFFF" className="mr-2" />
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-white text-xs ml-2"
+                  className="text-white text-sm ml-2"
                 >
-                  {gmailAccount ? "Rescan Inbox Now" : "Connect with Google"}
+                  {gmailAccount ? "Rescan Gmail Statements Now" : "Connect & Extract from Gmail"}
                 </Text>
               </>
             )}
           </TouchableOpacity>
         </View>
 
-        {/* Outlook Card */}
-        <View className="bg-white rounded-2xl p-4 mb-5 border border-border-light shadow-sm">
-          <View className="flex-row items-center justify-between mb-3">
-            <View className="flex-row items-center">
-              <View className="w-11 h-11 rounded-xl bg-blue-50 items-center justify-center mr-3 border border-blue-100">
-                <Text className="text-xl">📫</Text>
-              </View>
-              <View>
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-base text-dark"
-                >
-                  Microsoft Outlook
-                </Text>
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                  className="text-xs text-dark-muted"
-                >
-                  {outlookAccount ? outlookAccount.email : "Hotmail / Office 365"}
-                </Text>
-              </View>
-            </View>
-
-            {outlookAccount ? (
-              <View className="bg-emerald-50 px-2.5 py-1 rounded-full flex-row items-center border border-emerald-200">
-                <CheckCircle2 size={12} color="#059669" className="mr-1" />
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-[10px] text-emerald-700 ml-1"
-                >
-                  Connected
-                </Text>
-              </View>
-            ) : (
-              <View className="bg-gray-100 px-2.5 py-1 rounded-full">
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Medium" }}
-                  className="text-[10px] text-dark-muted"
-                >
-                  Available
-                </Text>
-              </View>
-            )}
-          </View>
-
-          <TouchableOpacity
-            onPress={() =>
-              handleStartSync(
-                "outlook",
-                outlookAccount?.email || user?.email || "user@outlook.com"
-              )
-            }
-            disabled={isSyncing}
-            className="w-full bg-white border border-border-light py-3 rounded-xl items-center flex-row justify-center"
-          >
-            {isSyncing && activeProvider === "outlook" ? (
-              <ActivityIndicator size="small" color="#070617" />
-            ) : (
-              <>
-                <Sparkles size={15} color="#070617" className="mr-2" />
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-dark text-xs ml-2"
-                >
-                  {outlookAccount ? "Rescan Outlook Now" : "Connect with Microsoft"}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* Security / How It Works Accordion */}
+        {/* Security / Privacy details */}
         <View className="bg-white rounded-2xl p-4 border border-border-light">
           <View className="flex-row items-center mb-2">
             <ShieldCheck size={18} color="#059669" className="mr-2" />
@@ -338,11 +261,12 @@ export default function EmailSyncScreen() {
 
           <Text
             style={{ fontFamily: "PlusJakartaSans-Regular" }}
-            className="text-xs text-dark-muted leading-5 mb-3"
+            className="text-xs text-dark-muted leading-5 mb-1"
           >
-            • We use Google & Microsoft OAuth tokens with restricted read-only permissions.
-            {"\n"}• Filtered exclusively for whitelist domains (e.g. airindia.com, marriott.com, hdfcbank.com).
-            {"\n"}• All statement data is encrypted on device with AES-256 standards.
+            • PointzPlus uses Google OAuth with restricted read-only permissions.
+            {"\n"}• Filtered exclusively for verified statement senders (e.g. airlines, hotels, banks).
+            {"\n"}• Manual entries and unverified sources are completely omitted.
+            {"\n"}• All extracted data is stored securely and processed locally.
           </Text>
         </View>
       </ScrollView>
@@ -359,14 +283,15 @@ export default function EmailSyncScreen() {
               style={{ fontFamily: "PlusJakartaSans-Bold" }}
               className="text-xl text-dark mb-1 text-center"
             >
-              Email Sync Complete!
+              Gmail Sync Complete!
             </Text>
 
             <Text
               style={{ fontFamily: "PlusJakartaSans-Regular" }}
               className="text-xs text-dark-muted text-center mb-5"
             >
-              Successfully scanned your statements and updated {syncedCount} loyalty programs in your PointzPlus portfolio.
+              Successfully scanned your Gmail statements and updated {syncedCount} loyalty programs.
+              Extracted {couponCount} coupon tokens for quick redemption.
             </Text>
 
             <TouchableOpacity

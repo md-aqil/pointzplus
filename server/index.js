@@ -4,10 +4,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { pool, testConnection, query } from './db.js';
+import { authenticate } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
 import accountsRoutes from './routes/accounts.js';
 import programsRoutes from './routes/programs.js';
 import emailSyncRoutes from './routes/emailSync.js';
+import couponsRoutes from './routes/coupons.js';
 import smsRoutes from './routes/sms.js';
 import notificationsRoutes from './routes/notifications.js';
 
@@ -16,7 +18,24 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(helmet());
-app.use(cors({ origin: '*', credentials: true }));
+// Explicit origin allowlist (never wildcard + credentials). Configure via CORS_ORIGINS.
+const allowedOrigins = (
+  process.env.CORS_ORIGINS ||
+  'http://localhost:8081,http://localhost:19006,http://localhost:3000'
+)
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // Native apps send no Origin header; allow those, plus the allowlist.
+      if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+      cb(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+  })
+);
 app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -36,15 +55,14 @@ app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountsRoutes);
 app.use('/api/programs', programsRoutes);
 app.use('/api/email-sync', emailSyncRoutes);
+app.use('/api/coupons', couponsRoutes);
 app.use('/api/sms', smsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 
-// Analytics endpoints
-app.get('/api/analytics/portfolio/:userId', async (req, res) => {
+// Analytics endpoints (scoped to the authenticated user – no IDOR via :userId)
+app.get('/api/analytics/portfolio', authenticate, async (req, res) => {
   try {
-    const { userId } = req.params;
-    
-    const result = await query(`
+    const result = await query(`    
       SELECT 
         COUNT(*) as total_accounts,
         COALESCE(SUM(current_balance), 0) as total_points,
@@ -52,7 +70,7 @@ app.get('/api/analytics/portfolio/:userId', async (req, res) => {
         MAX(last_synced_at) as last_sync
       FROM linked_accounts 
       WHERE user_id = $1 AND is_active = true
-    `, [userId]);
+    `, [req.userId]);
 
     // Category breakdown
     const categoryResult = await query(`
@@ -66,21 +84,21 @@ app.get('/api/analytics/portfolio/:userId', async (req, res) => {
       WHERE la.user_id = $1 AND la.is_active = true
       GROUP BY lp.category
       ORDER BY total_points DESC
-    `, [userId]);
+    `, [req.userId]);
 
     res.json({
       summary: result.rows[0],
       categories: categoryResult.rows
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Portfolio analytics error:', err);
+    res.status(500).json({ error: 'Failed to load portfolio analytics' });
   }
 });
 
-// Expiry alerts
-app.get('/api/alerts/expiring/:userId', async (req, res) => {
+// Expiry alerts (scoped to the authenticated user – no IDOR via :userId)
+app.get('/api/alerts/expiring', authenticate, async (req, res) => {
   try {
-    const { userId } = req.params;
     const result = await query(`
       SELECT 
         la.id,
@@ -98,11 +116,12 @@ app.get('/api/alerts/expiring/:userId', async (req, res) => {
         AND la.expiry_date IS NOT NULL
         AND la.expiry_date <= NOW() + INTERVAL '90 days'
       ORDER BY la.expiry_date ASC
-    `, [userId]);
+    `, [req.userId]);
 
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Expiry alerts error:', err);
+    res.status(500).json({ error: 'Failed to load expiry alerts' });
   }
 });
 
@@ -132,11 +151,13 @@ async function startServer() {
 ║   • POST   /api/accounts (add new account)               ║
 ║   • DELETE /api/accounts/:id                             ║
 ║   • GET    /api/programs (all loyalty programs)          ║
-║   • POST   /api/email-sync/connect                       ║
+║   • GET    /api/email-sync/google/url                    ║
 ║   • POST   /api/email-sync/scan                          ║
+║   • POST   /api/email-sync/google/watch                  ║
+║   • GET    /api/coupons                                  ║
 ║   • POST   /api/sms/detect                               ║
-║   • GET    /api/analytics/portfolio/:userId             ║
-║   • GET    /api/alerts/expiring/:userId                  ║
+║   • GET    /api/analytics/portfolio              ║
+║   • GET    /api/alerts/expiring                   ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
     `);

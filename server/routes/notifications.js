@@ -1,23 +1,19 @@
 // server/routes/notifications.js – Push Notifications & Alerts
 import express from 'express';
-import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { query } from '../db.js';
+import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'pointzplus-secret-key-2026';
 
-const authenticate = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.userId;
-    next();
-  } catch {
-    res.status(401).json({ error: 'Invalid token' });
-  }
-};
+// Cron/service-to-service guard for check-expiry. Rejects when CRON_SECRET is unset.
+function isCronAuthorized(req) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const provided = String(req.headers['x-cron-secret'] || '');
+  if (provided.length !== secret.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(secret));
+}
 
 // Get notification settings
 router.get('/settings', authenticate, async (req, res) => {
@@ -153,6 +149,12 @@ router.put('/acknowledge/:id', authenticate, async (req, res) => {
 
 // Check and create pending expiry alerts (called by cron job)
 router.post('/check-expiry', async (req, res) => {
+  if (!isCronAuthorized(req)) {
+    return res.status(401).json({
+      error:
+        'Unauthorized. Set CRON_SECRET in server/.env and send it as "x-cron-secret" header.',
+    });
+  }
   try {
     // Get all users with expiring points
     const result = await query(`
@@ -174,17 +176,20 @@ router.post('/check-expiry', async (req, res) => {
         (new Date(row.expiry_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
       );
       
-      // Check thresholds: 15, 30, 45, 90 days
+      // Bucketed thresholds: pick the smallest of 15/30/45/90 that is >= daysUntil
+      // so alerts fire on any day, not only exact-match days (which rarely occur).
       const thresholds = [15, 30, 45, 90];
-      if (!thresholds.includes(daysUntil)) continue;
+      const tier = thresholds.find((t) => daysUntil <= t);
+      if (!tier) continue;
+      const alertType = `${tier}days`;
 
-      // Check if alert already sent recently
+      // Skip if this tier already fired for this account within its window
       const existing = await query(`
         SELECT id FROM expiry_alerts 
         WHERE linked_account_id = $1 
           AND alert_type = $2
-          AND triggered_at > NOW() - INTERVAL '1 day'
-      `, [row.account_id, `${daysUntil}days`]);
+          AND triggered_at > NOW() - INTERVAL '1 day' * $3
+      `, [row.account_id, alertType, tier]);
 
       if (existing.rows.length > 0) continue;
 
@@ -193,7 +198,7 @@ router.post('/check-expiry', async (req, res) => {
         INSERT INTO expiry_alerts (
           user_id, linked_account_id, alert_type, points_at_risk, sent_push_notification
         ) VALUES ($1, $2, $3, $4, false)
-      `, [row.user_id, row.account_id, `${daysUntil}days`, row.expiring_points]);
+      `, [row.user_id, row.account_id, alertType, row.expiring_points]);
 
       alertsCreated++;
     }

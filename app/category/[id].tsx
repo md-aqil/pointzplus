@@ -4,32 +4,33 @@ import { View, Text, ScrollView } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { Clock, Layers, ArrowUpRight } from "lucide-react-native";
+import { Clock, Layers } from "lucide-react-native";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { BrandPointCard } from "../../components/cards/BrandPointCard";
-import { CATEGORIES, BRANDS } from "../../constants/categories";
+import { CATEGORIES } from "../../constants/categories";
+import { usePoints } from "../../hooks/usePoints";
 
 export default function CategoryDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
+  const { accounts, categories } = usePoints();
 
-  const category =
-    CATEGORIES.find((c) => c.id === id) || CATEGORIES[0]; // fallback to airlines
+  const categoryId = (typeof id === "string" ? id : "airlines").toLowerCase();
+  const staticCategory = CATEGORIES.find((c) => c.id.toLowerCase() === categoryId) || CATEGORIES[0];
+  const summaryCategory = categories.find((c) => c.categoryId.toLowerCase() === categoryId);
 
-  const brands = BRANDS.filter(
-    (b) => b.category.toLowerCase() === category.id.toLowerCase()
+  const categoryAccounts = accounts.filter(
+    (a) => a.isActive && a.program.category.toLowerCase() === categoryId
   );
 
-  const expiringTotal = brands.reduce(
-    (acc, cur) => acc + (cur.expiringPoints || 0),
-    0
-  );
+  const totalPoints = summaryCategory ? summaryCategory.totalPoints : 0;
+  const expiringTotal = summaryCategory ? summaryCategory.expiringPoints : 0;
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">
       <ScreenHeader
-        title={category.name}
-        subtitle={`${brands.length} linked programs`}
+        title={staticCategory.name}
+        subtitle={`${categoryAccounts.length} linked programs`}
         onBack={() => router.back()}
       />
 
@@ -57,7 +58,7 @@ export default function CategoryDetailScreen() {
                 style={{ fontFamily: "PlusJakartaSans-Bold" }}
                 className="text-3xl text-white tracking-tight"
               >
-                {category.totalPoints.toLocaleString()}{" "}
+                {totalPoints.toLocaleString()}{" "}
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
                   className="text-primary text-sm"
@@ -97,12 +98,12 @@ export default function CategoryDetailScreen() {
           style={{ fontFamily: "PlusJakartaSans-Bold" }}
           className="text-base text-dark mb-3"
         >
-          Programs in {category.name}
+          Programs in {staticCategory.name}
         </Text>
 
-        {brands.length > 0 ? (
-          brands.map((brand) => (
-            <BrandPointCard key={brand.id} brand={brand} />
+        {categoryAccounts.length > 0 ? (
+          categoryAccounts.map((account) => (
+            <BrandPointCard key={account.id} account={account} />
           ))
         ) : (
           <View className="bg-white p-6 rounded-2xl border border-border-light items-center justify-center">
@@ -110,7 +111,7 @@ export default function CategoryDetailScreen() {
               style={{ fontFamily: "PlusJakartaSans-Regular" }}
               className="text-xs text-dark-muted text-center"
             >
-              No programs linked yet in {category.name}.
+              No programs extracted from Gmail yet in {staticCategory.name}.
             </Text>
           </View>
         )}

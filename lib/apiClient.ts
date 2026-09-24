@@ -135,11 +135,48 @@ class ApiClient {
     });
   }
 
-  async scanEmails(provider: string) {
+  async scanEmails(provider: string, wait = true) {
     return this.request<any>('/email-sync/scan', {
       method: 'POST',
-      body: JSON.stringify({ provider }),
+      body: JSON.stringify({ provider, wait }),
     });
+  }
+
+  async getSyncJob(jobId: string) {
+    return this.request<any>(`/email-sync/jobs/${jobId}`);
+  }
+
+  async enableGmailWatch() {
+    return this.request<any>('/email-sync/google/watch', { method: 'POST' });
+  }
+
+  // ─── Coupons ─────────────────────────────────────────
+  async getCoupons(params?: { used?: boolean; category?: string; active?: boolean }) {
+    const search = new URLSearchParams();
+    if (params?.used !== undefined) search.set('used', String(params.used));
+    if (params?.category) search.set('category', params.category);
+    if (params?.active) search.set('active', 'true');
+    const qs = search.toString();
+    return this.request<any[]>(`/coupons${qs ? `?${qs}` : ''}`);
+  }
+
+  async getExpiringCoupons() {
+    return this.request<any[]>('/coupons/expiring');
+  }
+
+  async getCouponSummary() {
+    return this.request<{ active: number; used: number; expiringSoon: number }>('/coupons/summary');
+  }
+
+  async markCouponUsed(id: string, isUsed = true) {
+    return this.request<any>(`/coupons/${id}/use`, {
+      method: 'PUT',
+      body: JSON.stringify({ isUsed }),
+    });
+  }
+
+  async deleteCoupon(id: string) {
+    return this.request<any>(`/coupons/${id}`, { method: 'DELETE' });
   }
 
   async getEmailAccounts() {

@@ -1,4 +1,4 @@
-// types/loyalty.ts – Core domain types for PointzPlus MVP
+// types/loyalty.ts – Core domain types for PointzPlus
 import { z } from "zod";
 
 // ─── Loyalty Program (from catalog) ──────────────────────────────
@@ -24,6 +24,36 @@ export interface LinkedAccount {
   lastSyncedAt: string; // ISO timestamp
   syncMethod: "manual" | "email_parser" | "sms" | "api";
   isActive: boolean;
+}
+
+// ─── Extracted Coupons & Promo Tokens ────────────────────────────
+export type CouponType = 
+  | "discount_code" 
+  | "barcode_voucher" 
+  | "qr_token" 
+  | "cashback_credit" 
+  | "points_multiplier";
+
+export interface ExtractedCoupon {
+  id: string;
+  merchantName: string;
+  category: LoyaltyCategory;
+  couponCode: string;
+  couponType: CouponType;
+  title: string;
+  description?: string;
+  discountValue: string; // e.g. "20% OFF", "₹500 OFF", "2X Points"
+  minimumSpendINR?: number;
+  expiryDate?: string | null;
+  barcodeData?: string;
+  qrCodeUrl?: string;
+  redemptionUrl?: string;
+  isUsed: boolean;
+  usedAt?: string | null;
+  sourceEmailSubject?: string;
+  sourceSender?: string;
+  confidenceScore: number;
+  createdAt?: string;
 }
 
 // ─── Points Transaction Log ─────────────────────────────────────
@@ -56,17 +86,19 @@ export interface DashboardSummary {
   expiringThisMonth: number;
   portfolioValueINR: number;
   linkedAccountsCount: number;
+  activeCouponsCount: number;
 }
 
 // ─── Email Sync Types ────────────────────────────────────────────
 export interface EmailSyncAccount {
   id: string;
-  provider: "gmail" | "outlook";
+  provider: "gmail";
   email: string;
   connectedAt: string;
   lastSyncAt: string | null;
   status: "connected" | "needs_reauth" | "syncing" | "error";
   programsFound: number;
+  couponsFound?: number;
 }
 
 export interface ParsedEmailResult {
@@ -78,7 +110,21 @@ export interface ParsedEmailResult {
   expiryDate?: string;
   sourceEmailSubject: string;
   sourceEmailDate: string;
-  confidence: number; // 0-1, how confident the parser is
+  confidence: number;
+}
+
+export interface SyncJob {
+  id: string;
+  userId: string;
+  provider: "gmail" | "outlook" | "yahoo";
+  status: "queued" | "fetching" | "parsing" | "completed" | "failed";
+  totalMessagesFound: number;
+  messagesProcessed: number;
+  couponsExtracted: number;
+  programsUpdated: number;
+  errorDetails?: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 // ─── Enums ───────────────────────────────────────────────────────

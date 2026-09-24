@@ -1,27 +1,9 @@
 // server/routes/accounts.js – Linked Accounts CRUD
 import express from 'express';
-import jwt from 'jsonwebtoken';
 import { query } from '../db.js';
+import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'pointzplus-secret-key-2026';
-
-// Middleware to verify token
-const authenticate = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  try {
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.userId;
-    next();
-  } catch (err) {
-    res.status(401).json({ error: 'Invalid token' });
-  }
-};
 
 // Get all linked accounts for user
 router.get('/', authenticate, async (req, res) => {
@@ -39,6 +21,7 @@ router.get('/', authenticate, async (req, res) => {
         la.is_active,
         la.created_at,
         lp.id as program_id,
+        lp.slug as program_slug,
         lp.name as program_name,
         lp.category,
         lp.logo_initial,
@@ -64,6 +47,7 @@ router.get('/:id', authenticate, async (req, res) => {
       SELECT 
         la.*,
         lp.name as program_name,
+        lp.slug as program_slug,
         lp.category,
         lp.logo_initial,
         lp.accent_color

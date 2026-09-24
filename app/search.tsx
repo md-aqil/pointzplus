@@ -8,18 +8,22 @@ import { ScreenHeader } from "../components/ui/ScreenHeader";
 import { Input } from "../components/ui/Input";
 import { CategoryCard } from "../components/cards/CategoryCard";
 import { BrandPointCard } from "../components/cards/BrandPointCard";
-import { CATEGORIES, BRANDS } from "../constants/categories";
+import { usePoints } from "../hooks/usePoints";
 
 export default function SearchScreen() {
   const router = useRouter();
+  const { accounts, categories } = usePoints();
   const [query, setQuery] = useState("");
 
-  const filteredCategories = CATEGORIES.filter((c) =>
-    c.name.toLowerCase().includes(query.toLowerCase())
+  const filteredCategories = categories.filter((c) =>
+    c.categoryName.toLowerCase().includes(query.toLowerCase())
   );
 
-  const filteredBrands = BRANDS.filter((b) =>
-    b.name.toLowerCase().includes(query.toLowerCase())
+  const filteredAccounts = accounts.filter(
+    (a) =>
+      a.isActive &&
+      (a.program.name.toLowerCase().includes(query.toLowerCase()) ||
+        a.program.category.toLowerCase().includes(query.toLowerCase()))
   );
 
   return (
@@ -59,34 +63,34 @@ export default function SearchScreen() {
             </Text>
             {filteredCategories.map((category) => (
               <CategoryCard
-                key={category.id}
+                key={category.categoryId}
                 category={category}
-                onPress={() => router.push(`/category/${category.id}`)}
+                onPress={() => router.push(`/category/${category.categoryId}`)}
               />
             ))}
           </View>
         )}
 
-        {/* Brands Results */}
-        {filteredBrands.length > 0 && (
+        {/* Programs Results */}
+        {filteredAccounts.length > 0 && (
           <View className="mb-4">
             <Text
               style={{ fontFamily: "PlusJakartaSans-Bold" }}
               className="text-xs text-dark-muted uppercase tracking-wider mb-3"
             >
-              Programs
+              Linked Programs
             </Text>
-            {filteredBrands.map((brand) => (
+            {filteredAccounts.map((account) => (
               <BrandPointCard
-                key={brand.id}
-                brand={brand}
-                onPress={() => router.push(`/category/${brand.category}`)}
+                key={account.id}
+                account={account}
+                onPress={() => router.push(`/category/${account.program.category}`)}
               />
             ))}
           </View>
         )}
 
-        {filteredCategories.length === 0 && filteredBrands.length === 0 && (
+        {filteredCategories.length === 0 && filteredAccounts.length === 0 && (
           <View className="bg-white p-8 rounded-3xl border border-border-light items-center justify-center my-6">
             <Search size={32} color="#9C9BA2" className="mb-3" />
             <Text
@@ -99,7 +103,7 @@ export default function SearchScreen() {
               style={{ fontFamily: "PlusJakartaSans-Regular" }}
               className="text-xs text-dark-muted text-center"
             >
-              Try searching for "Airlines", "Hotels", or specific brand names.
+              {query ? `No matches for "${query}"` : "Search across all extracted loyalty programs"}
             </Text>
           </View>
         )}

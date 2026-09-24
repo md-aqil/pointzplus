@@ -4,7 +4,7 @@ import Svg, { Path, Circle, Rect, Line, G } from "react-native-svg";
 
 interface TabIconProps {
   focused: boolean;
-  color?: string;
+  color?: any;
   size?: number;
 }
 

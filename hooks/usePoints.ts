@@ -1,52 +1,59 @@
-// hooks/usePoints.ts – Unified hook connecting Zustand pointsStore to components
 import { usePointsStore } from "../store/pointsStore";
 import { useAuthStore } from "../store/authStore";
+import { initialNotifications, NotificationItem } from "../lib/db";
 
 export function usePoints() {
   const user = useAuthStore((state) => state.user);
   const accounts = usePointsStore((state) => state.accounts);
   const emailAccounts = usePointsStore((state) => state.emailAccounts);
+  const coupons = usePointsStore((state) => state.coupons);
   const isSyncing = usePointsStore((state) => state.isSyncing);
   const syncProgress = usePointsStore((state) => state.syncProgress);
   const getDashboardSummary = usePointsStore((state) => state.getDashboardSummary);
   const getCategorySummaries = usePointsStore((state) => state.getCategorySummaries);
   const getExpiringAccounts = usePointsStore((state) => state.getExpiringAccounts);
+  const getActiveCoupons = usePointsStore((state) => state.getActiveCoupons);
+  const getExpiringCoupons = usePointsStore((state) => state.getExpiringCoupons);
   const addManualAccount = usePointsStore((state) => state.addManualAccount);
   const syncEmail = usePointsStore((state) => state.syncEmail);
   const deleteAccount = usePointsStore((state) => state.deleteAccount);
+  const markCouponUsed = usePointsStore((state) => state.markCouponUsed);
   const refreshAll = usePointsStore((state) => state.refreshAll);
 
   const summary = getDashboardSummary();
   const categorySummaries = getCategorySummaries();
   const expiringAccounts = getExpiringAccounts();
+  const activeCoupons = getActiveCoupons();
+  const expiringCoupons = getExpiringCoupons();
 
   return {
-    // Aggregates
     summary,
     totalPoints: summary.totalPoints,
     monthlyEarned: summary.monthlyEarned,
     expiringSoon: summary.expiringThisMonth,
     portfolioValueINR: summary.portfolioValueINR,
     linkedAccountsCount: summary.linkedAccountsCount,
+    activeCouponsCount: summary.activeCouponsCount,
 
-    // Lists
     accounts,
     emailAccounts,
+    coupons,
+    activeCoupons,
+    expiringCoupons,
+    notifications: initialNotifications as NotificationItem[],
     categories: categorySummaries,
     expiringAccounts,
 
-    // Sync State
     isSyncing,
     syncProgress,
 
-    // Actions
     addManualAccount,
     syncEmail,
     deleteAccount,
+    markCouponUsed,
     refreshAll,
     refetch: refreshAll,
 
-    // User metadata
     profile: user,
     isLoading: isSyncing,
   };
