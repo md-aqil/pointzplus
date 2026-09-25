@@ -21,12 +21,13 @@ import {
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { usePoints } from "../hooks/usePoints";
+import { usePointsStore } from "../store/pointsStore";
 import { useAuth } from "../hooks/useAuth";
 
 export default function EmailSyncScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { emailAccounts, syncEmail, isSyncing, syncProgress, expiringCoupons, activeCoupons } = usePoints();
+  const { emailAccounts, syncEmail, isSyncing, syncProgress, expiringCoupons } = usePoints();
   const [syncSuccessModal, setSyncSuccessModal] = useState(false);
   const [syncedCount, setSyncedCount] = useState(0);
   const [couponCount, setCouponCount] = useState(0);
@@ -38,8 +39,11 @@ export default function EmailSyncScreen() {
     try {
       const results = await syncEmail("gmail", email);
       setSyncedCount(results.length);
-      // coupons should already be fetched/updated into Zustand
-      setCouponCount(activeCoupons.length);
+      // Read the fresh coupon list from the store: `activeCoupons` is captured
+      // from the current render, so it predates the sync that just completed.
+      setCouponCount(
+        usePointsStore.getState().coupons.filter((c) => !c.isUsed).length
+      );
       setSyncSuccessModal(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) {

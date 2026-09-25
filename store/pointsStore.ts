@@ -9,10 +9,84 @@ import {
   LoyaltyCategory,
   ExtractedCoupon,
 } from "../types/loyalty";
-import { NotificationItem } from "../types/models";
+import { NotificationItem, SyncJob, SyncJobStatus, BackendLinkedAccount } from "../types/models";
 import { POPULAR_PROGRAMS, CATEGORY_LABELS } from "../constants/popularPrograms";
 import { apiClient } from "../lib/apiClient";
 import { notifyPointsEarned, notifySpecialOffer } from "../services/pushNotifications";
+
+// ─── Gmail sync job polling ────────────────────────────────────
+const SYNC_JOB_POLL_INTERVAL_MS = 2_000;
+const SYNC_JOB_TIMEOUT_MS = 10 * 60 * 1_000;
+
+const SYNC_JOB_PROGRESS: Partial<Record<SyncJobStatus, { step: string; percent: number }>> = {
+  queued: { step: "Scan queued – waiting for the sync worker...", percent: 30 },
+  fetching: { step: "Searching your inbox for statements & promo tokens...", percent: 55 },
+  parsing: { step: "Extracting points & coupons from matched emails...", percent: 80 },
+  completed: { step: "Finalizing your portfolio...", percent: 92 },
+};
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Map a `linked_accounts` API row onto the client model, joined to the catalogue. */
+function mapBackendAccount(a: BackendLinkedAccount): LinkedAccount {
+  const catalogProgram =
+    POPULAR_PROGRAMS.find((p) => p.id === (a.program_slug ?? a.program_id)) || {
+      id: a.program_id,
+      name: a.program_name || "Loyalty Program",
+      category: (a.category || "shopping") as LoyaltyCategory,
+      logoInitial: a.logo_initial || "⭐",
+      accentColor: a.accent_color || "#01A2FB",
+      defaultExpiryMonths: 12,
+      pointValueINR: Number(a.point_value_inr) || 0.25,
+    };
+
+  return {
+    id: a.id,
+    programId: a.program_id,
+    program: catalogProgram,
+    accountNumberMasked: a.account_number_masked || "",
+    currentBalance: a.current_balance,
+    expiringPoints: a.expiring_points || 0,
+    expiryDate: a.expiry_date,
+    lastSyncedAt: a.last_synced_at || new Date().toISOString(),
+    syncMethod: (a.sync_method || "manual") as LinkedAccount["syncMethod"],
+    isActive: a.is_active ?? true,
+  };
+}
+
+/**
+ * Poll a queued Gmail scan until it reaches a terminal state.
+ * The scan runs in a background job, so this is how the UI learns it finished.
+ */
+async function pollSyncJob(
+  jobId: string,
+  onStatus: (status: SyncJobStatus) => void
+): Promise<SyncJob> {
+  const deadline = Date.now() + SYNC_JOB_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    let job;
+    try {
+      job = await apiClient.getSyncJob(jobId);
+    } catch {
+      // A transient network blip must not abandon a scan that is still running.
+      await delay(SYNC_JOB_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    if (job.status === "failed") {
+      throw new Error(job.error_details || "Gmail sync failed. Please try again.");
+    }
+    if (job.status === "completed") {
+      return job;
+    }
+
+    onStatus(job.status);
+    await delay(SYNC_JOB_POLL_INTERVAL_MS);
+  }
+
+  throw new Error("Gmail sync is taking longer than expected. Please try again shortly.");
+}
 
 interface PointsState {
   // Data (Defaults to empty – no dummy data)
@@ -227,33 +301,7 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     try {
       const backendAccounts = await apiClient.getAccounts();
       if (Array.isArray(backendAccounts)) {
-        const formatted: LinkedAccount[] = backendAccounts.map((a: any) => {
-          const catalogProgram =
-            POPULAR_PROGRAMS.find((p) => p.id === (a.program_slug ?? a.program_id)) || {
-            id: a.program_id,
-            name: a.program_name || "Loyalty Program",
-            category: a.category || "shopping",
-            logoInitial: a.logo_initial || "⭐",
-            accentColor: a.accent_color || "#01A2FB",
-            defaultExpiryMonths: 12,
-            pointValueINR: parseFloat(a.point_value_inr) || 0.25,
-          };
-
-          return {
-            id: a.id,
-            programId: a.program_id,
-            program: catalogProgram,
-            accountNumberMasked: a.account_number_masked,
-            currentBalance: a.current_balance,
-            expiringPoints: a.expiring_points || 0,
-            expiryDate: a.expiry_date,
-            lastSyncedAt: a.last_synced_at,
-            syncMethod: a.sync_method || "manual",
-            isActive: a.is_active,
-          };
-        });
-
-        set({ accounts: formatted });
+        set({ accounts: backendAccounts.map(mapBackendAccount) });
       }
     } catch {
       // Offline or unauthenticated fallback
@@ -408,78 +456,44 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     };
 
     try {
-      let syncedAccounts: LinkedAccount[] = [];
-      let syncedCoupons: ExtractedCoupon[] = [];
-      try {
-        handleProgress("Scanning Gmail for statements & promo tokens...", 40);
-        const scanRes = await apiClient.scanEmails(provider, true);
-        if (scanRes?.accounts?.length) {
-          syncedAccounts = scanRes.accounts.map((a: any) => {
-            const prog =
-              POPULAR_PROGRAMS.find((p) => p.id === (a.program_slug ?? a.program_id)) || {
-                id: a.program_id,
-                name: a.program_name || "Loyalty Program",
-                category: (a.category || "airlines") as LoyaltyCategory,
-                logoInitial: a.logo_initial || "✈️",
-                accentColor: a.accent_color || "#01A2FB",
-                defaultExpiryMonths: 24,
-                pointValueINR: parseFloat(a.point_value_inr) || 0.35,
-              };
-            return {
-              id: a.id,
-              programId: a.program_id,
-              program: prog,
-              accountNumberMasked: a.account_number_masked,
-              currentBalance: a.current_balance,
-              expiringPoints: a.expiring_points || 0,
-              expiryDate: a.expiry_date,
-              lastSyncedAt: new Date().toISOString(),
-              syncMethod: "email_parser" as const,
-              isActive: true,
-            };
-          });
-        }
-        if (scanRes?.coupons?.length) {
-          syncedCoupons = scanRes.coupons.map(mapCoupon);
-        }
-        handleProgress("Normalizing extracted balances & coupons...", 85);
-      } catch (scanError) {
-        // No fabricated fallback: a sync must reflect real mailbox data, so an
-        // API failure surfaces to the user instead of inventing accounts.
-        handleProgress("Sync failed", 0);
-        throw scanError;
-      }
+      handleProgress("Queueing mailbox scan...", 25);
+      // The Gmail fetch + parse runs server-side as a job. Queuing returns in
+      // milliseconds, so the HTTP request never blocks the UI thread.
+      const { jobId } = await apiClient.queueEmailScan(provider);
+      const job = await pollSyncJob(jobId, (status) => {
+        const phase = SYNC_JOB_PROGRESS[status];
+        if (phase) handleProgress(phase.step, phase.percent);
+      });
 
+      handleProgress("Refreshing your portfolio...", 90);
       const previousBalances = new Map(
         get().accounts.map((a) => [a.programId, a.currentBalance])
       );
 
+      // The job persisted everything to PostgreSQL, so read the authoritative
+      // state back from the API rather than trusting the scan response.
+      // No fabricated fallback: a failure here surfaces to the user.
+      const rows = await apiClient.getAccounts();
+      const syncedAccounts = Array.isArray(rows) ? rows.map(mapBackendAccount) : [];
+      await get().fetchCouponsFromBackend();
+
       set((state) => {
-        const existingProgramIds = new Set(syncedAccounts.map((a) => a.programId));
-        const filteredOld = state.accounts.filter((a) => !existingProgramIds.has(a.programId));
-        const couponKeys = new Set(syncedCoupons.map((c) => `${c.couponCode}-${c.merchantName}`));
-        const filteredCoupons = state.coupons.filter(
-          (c) => !couponKeys.has(`${c.couponCode}-${c.merchantName}`)
-        );
-
-        const updatedEmailAccounts: EmailSyncAccount[] = [
-          ...state.emailAccounts.filter((e) => e.provider !== provider),
-          {
-            id: `email_${Date.now()}`,
-            provider,
-            email,
-            connectedAt: new Date().toISOString(),
-            lastSyncAt: new Date().toISOString(),
-            status: "connected",
-            programsFound: syncedAccounts.length,
-            couponsFound: syncedCoupons.length,
-          },
-        ];
-
+        const previous = state.emailAccounts.find((e) => e.provider === provider);
         return {
-          accounts: [...syncedAccounts, ...filteredOld],
-          coupons: [...syncedCoupons, ...filteredCoupons],
-          emailAccounts: updatedEmailAccounts,
+          accounts: syncedAccounts,
+          emailAccounts: [
+            ...state.emailAccounts.filter((e) => e.provider !== provider),
+            {
+              id: previous?.id || `email_${Date.now()}`,
+              provider,
+              email,
+              connectedAt: previous?.connectedAt || new Date().toISOString(),
+              lastSyncAt: new Date().toISOString(),
+              status: "connected" as const,
+              programsFound: job.programs_updated ?? syncedAccounts.length,
+              couponsFound: job.coupons_extracted ?? 0,
+            },
+          ],
           isSyncing: false,
           syncProgress: { step: "Done", percent: 100 },
         };

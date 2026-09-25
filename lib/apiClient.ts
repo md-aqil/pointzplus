@@ -1,5 +1,6 @@
 // lib/apiClient.ts – Local PostgreSQL API Client
 import * as SecureStore from 'expo-secure-store';
+import type { BackendLinkedAccount, SyncJob } from '../types/models';
 
 // Local server URL (defaults to localhost:3001 for web & simulator)
 const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001/api';
@@ -107,7 +108,7 @@ class ApiClient {
 
   // ─── Accounts ─────────────────────────────────────────
   async getAccounts() {
-    return this.request<any[]>('/accounts');
+    return this.request<BackendLinkedAccount[]>('/accounts');
   }
 
   async getAccount(id: string) {
@@ -159,15 +160,20 @@ class ApiClient {
     });
   }
 
-  async scanEmails(provider: string, wait = true) {
-    return this.request<any>('/email-sync/scan', {
+  /**
+   * Queue a mailbox scan and return immediately (HTTP 202).
+   * The heavy Gmail fetch + parse runs server-side as a job, so the request
+   * never blocks the UI. Poll `getSyncJob` for completion.
+   */
+  async queueEmailScan(provider: string) {
+    return this.request<{ jobId: string; status: 'queued'; message: string }>('/email-sync/scan', {
       method: 'POST',
-      body: JSON.stringify({ provider, wait }),
+      body: JSON.stringify({ provider, wait: false }),
     });
   }
 
   async getSyncJob(jobId: string) {
-    return this.request<any>(`/email-sync/jobs/${jobId}`);
+    return this.request<SyncJob>(`/email-sync/jobs/${jobId}`);
   }
 
   async enableGmailWatch() {
