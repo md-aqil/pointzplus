@@ -1,5 +1,5 @@
 // app/email-sync.tsx – Google Gmail OAuth Auto-Sync Screen
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,6 +7,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Modal,
+  Linking,
+  AppState,
+  Alert,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -23,31 +26,70 @@ import * as Haptics from "expo-haptics";
 import { usePoints } from "../hooks/usePoints";
 import { usePointsStore } from "../store/pointsStore";
 import { useAuth } from "../hooks/useAuth";
+import { apiClient } from "../lib/apiClient";
 
 export default function EmailSyncScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { emailAccounts, syncEmail, isSyncing, syncProgress, expiringCoupons } = usePoints();
+  const fetchAccountsFromBackend = usePointsStore((s) => s.fetchAccountsFromBackend);
   const [syncSuccessModal, setSyncSuccessModal] = useState(false);
   const [syncedCount, setSyncedCount] = useState(0);
   const [couponCount, setCouponCount] = useState(0);
+  const [isConnecting, setIsConnecting] = useState(false);
 
-  const gmailAccount = emailAccounts.find((e) => e.provider === "gmail");
+  const gmailAccount = emailAccounts.find((e) => e.provider === "gmail" && e.status === "connected");
+
+  // Refresh connected accounts on mount and when app returns to foreground
+  useEffect(() => {
+    fetchAccountsFromBackend();
+
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        fetchAccountsFromBackend();
+      }
+    });
+    return () => sub.remove();
+  }, [fetchAccountsFromBackend]);
+
+  const handleConnectGmail = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsConnecting(true);
+    try {
+      const res = await apiClient.getEmailAuthUrl("google");
+      if (res?.url) {
+        await Linking.openURL(res.url);
+      } else {
+        Alert.alert(
+          "OAuth Configuration Required",
+          "Google OAuth credentials must be set in server/.env (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)."
+        );
+      }
+    } catch (err: any) {
+      Alert.alert(
+        "Connection Error",
+        err?.message || "Could not retrieve Google Sign-In URL. Please verify server connectivity."
+      );
+    } finally {
+      setIsConnecting(false);
+    }
+  };
 
   const handleStartSync = async (email: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const results = await syncEmail("gmail", email);
       setSyncedCount(results.length);
-      // Read the fresh coupon list from the store: `activeCoupons` is captured
-      // from the current render, so it predates the sync that just completed.
       setCouponCount(
         usePointsStore.getState().coupons.filter((c) => !c.isUsed).length
       );
       setSyncSuccessModal(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (e) {
-      alert("Failed to extract data from Gmail. Please try again.");
+    } catch (e: any) {
+      Alert.alert(
+        "Sync Failed",
+        e?.message || "Failed to extract data from Gmail. Please reconnect your account and try again."
+      );
     }
   };
 
@@ -227,13 +269,17 @@ export default function EmailSyncScreen() {
           )}
 
           <TouchableOpacity
-            onPress={() =>
-              handleStartSync(gmailAccount?.email || user?.email || "")
-            }
-            disabled={isSyncing}
+            onPress={() => {
+              if (gmailAccount) {
+                handleStartSync(gmailAccount.email);
+              } else {
+                handleConnectGmail();
+              }
+            }}
+            disabled={isSyncing || isConnecting}
             className="w-full bg-primary-dark py-3.5 rounded-xl items-center flex-row justify-center shadow-sm"
           >
-            {isSyncing ? (
+            {isSyncing || isConnecting ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
               <>
@@ -242,7 +288,7 @@ export default function EmailSyncScreen() {
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
                   className="text-white text-sm ml-2"
                 >
-                  {gmailAccount ? "Rescan Gmail Statements Now" : "Connect & Extract from Gmail"}
+                  {gmailAccount ? "Rescan Gmail Statements Now" : "Connect Google Account"}
                 </Text>
               </>
             )}

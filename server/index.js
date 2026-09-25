@@ -32,8 +32,16 @@ const allowedOrigins = (
 app.use(
   cors({
     origin: (origin, cb) => {
-      // Native apps send no Origin header; allow those, plus the allowlist.
+      // Native apps send no Origin header; allow those, plus the allowlist & local dev origins.
       if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+      if (
+        process.env.NODE_ENV !== 'production' &&
+        /^http:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$/.test(
+          origin
+        )
+      ) {
+        return cb(null, true);
+      }
       cb(new Error('Not allowed by CORS'));
     },
     credentials: true,

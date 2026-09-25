@@ -314,9 +314,26 @@ export const usePointsStore = create<PointsState>((set, get) => ({
   // ─── Actions ────────────────────────────────────────────────────
   fetchAccountsFromBackend: async () => {
     try {
-      const backendAccounts = await apiClient.getAccounts();
+      const [backendAccounts, backendEmailAccounts] = await Promise.all([
+        apiClient.getAccounts().catch(() => null),
+        apiClient.getEmailAccounts().catch(() => null),
+      ]);
       if (Array.isArray(backendAccounts)) {
         set({ accounts: backendAccounts.map(mapBackendAccount) });
+      }
+      if (Array.isArray(backendEmailAccounts)) {
+        set({
+          emailAccounts: backendEmailAccounts.map((e: any) => ({
+            id: e.id,
+            provider: (e.provider || "gmail") as "gmail",
+            email: e.email,
+            connectedAt: e.created_at || new Date().toISOString(),
+            lastSyncAt: e.last_sync_at || null,
+            status: e.is_active ? ("connected" as const) : ("needs_reauth" as const),
+            programsFound: Number(e.programs_found || 0),
+            couponsFound: 0,
+          })),
+        });
       }
     } catch {
       // Offline or unauthenticated fallback
