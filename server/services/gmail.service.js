@@ -6,12 +6,16 @@ import { JWT_SECRET } from '../middleware/auth.js';
 import { encryptToken, decryptToken } from '../crypto.js';
 import { StatementAndCouponParser } from './statementAndCouponParser.js';
 import { EmailSyncRepo } from '../repositories/emailSync.repo.js';
+import { notifyJobQueued } from '../lib/workerBus.js';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const GOOGLE_REDIRECT_URI =
   process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3001/api/email-sync/google/callback';
 const GOOGLE_PUBSUB_TOPIC = process.env.GOOGLE_PUBSUB_TOPIC;
+
+// How often a running scan reports per-message progress to sync_jobs.
+const PROGRESS_UPDATE_EVERY = 5;
 
 export function createOAuthClient() {
   return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
@@ -217,7 +221,7 @@ async function persistCouponResult(userId, couponData, programId = null) {
 
 // ─── Scan pipeline ───────────────────────────────────────────────
 
-async function scanGmailMessages(account, { maxResults = 40, historyId = null } = {}) {
+async function scanGmailMessages(account, { maxResults = 40, historyId = null, jobId = null } = {}) {
   const oAuth2Client = createOAuthClient();
   const refreshPlaintext = decryptToken(
     account.oauth_refresh_token,
@@ -285,6 +289,12 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null } 
     messages = fallbackRes.data.messages || [];
   }
 
+  // Fetching is done. Publish the parse phase and the real match count so the
+  // app's progress bar reflects actual work instead of a guessed animation.
+  if (jobId) {
+    await EmailSyncRepo.markJobParsing(jobId, messages.length);
+  }
+
   const detectedAccounts = [];
   const extractedCoupons = [];
   let programsAdded = 0;
@@ -344,6 +354,11 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null } 
       }
 
       processed += 1;
+      // Batched heartbeat: cheap enough to stay responsive, not so chatty that
+      // it doubles the query count on a large inbox.
+      if (jobId && processed % PROGRESS_UPDATE_EVERY === 0) {
+        await EmailSyncRepo.updateJobProgress(jobId, processed);
+      }
     } catch (msgErr) {
       console.error(`Error parsing message ${msg.id}:`, msgErr.message);
     }
@@ -369,11 +384,26 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null } 
   };
 }
 
-async function runScanJob(jobId, account) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Execute one already-claimed sync job. Invoked by the background worker.
+ * The connected account is loaded here rather than captured when the job was
+ * queued, so the job survives an API restart between queueing and execution.
+ */
+export async function processSyncJob(job) {
+  const account = await EmailSyncRepo.findConnected(job.user_id, job.provider);
+  if (!account) {
+    await EmailSyncRepo.markJobFailed(
+      job.id,
+      `No connected ${job.provider} account found. Reconnect it in the app.`
+    );
+    throw new Error('no connected sync account');
+  }
+
   try {
-    await EmailSyncRepo.markJobFetching(jobId);
-    const result = await scanGmailMessages(account);
-    await EmailSyncRepo.markJobCompleted(jobId, {
+    const result = await scanGmailMessages(account, { jobId: job.id });
+    await EmailSyncRepo.markJobCompleted(job.id, {
       scanned: result.scanned,
       processed: result.processed,
       couponsInserted: result.couponsInserted,
@@ -381,9 +411,33 @@ async function runScanJob(jobId, account) {
     });
     return result;
   } catch (err) {
-    await EmailSyncRepo.markJobFailed(jobId, err.message);
+    await EmailSyncRepo.markJobFailed(job.id, err.message);
     throw err;
   }
+}
+
+// `wait=true` exists for scripts and tests. It waits on the job row in the
+// database rather than doing the work inside the request.
+const SYNC_WAIT_POLL_MS = 1000;
+const SYNC_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
+
+async function waitForJob(jobId, userId, timeoutMs = SYNC_WAIT_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const job = await EmailSyncRepo.getJob(jobId, userId);
+    if (!job) return null;
+    if (job.status === 'completed') return job;
+    if (job.status === 'failed') {
+      throw Object.assign(new Error(job.error_details || 'Gmail sync failed.'), {
+        statusCode: 502,
+      });
+    }
+    await sleep(SYNC_WAIT_POLL_MS);
+  }
+  throw Object.assign(
+    new Error('Gmail sync is still running and will finish in the background.'),
+    { statusCode: 504 }
+  );
 }
 
 // ─── High-level operations (used by the controller) ──────────────
@@ -427,7 +481,11 @@ export const gmailService = {
     return email;
   },
 
-  /** Run a scan now (wait=true) or queue it in the background. */
+  /**
+   * Queue a mailbox scan. The work always happens in the background worker, so
+   * the response returns as soon as the job row exists.
+   * `wait=true` is for scripts/tests: it then waits on the job row instead.
+   */
   async scan(userId, provider, wait) {
     const account = await EmailSyncRepo.findConnected(userId, provider);
     if (!account) {
@@ -440,13 +498,10 @@ export const gmailService = {
     }
 
     const job = await EmailSyncRepo.createJob(userId, provider);
+    // A worker claims this. Nudging the bus only removes the poll latency.
+    notifyJobQueued();
 
     if (!wait) {
-      setImmediate(() => {
-        runScanJob(job.id, account).catch((err) =>
-          console.error('Background scan failed:', err.message)
-        );
-      });
       return {
         status: 202,
         body: {
@@ -457,7 +512,16 @@ export const gmailService = {
       };
     }
 
-    const result = await runScanJob(job.id, account);
+    let finished;
+    try {
+      finished = await waitForJob(job.id, userId);
+    } catch (err) {
+      return {
+        status: err.statusCode || 500,
+        body: { error: err.message, jobId: job.id },
+      };
+    }
+
     const [linked, coupons] = await Promise.all([
       EmailSyncRepo.linkedAccountsWithPrograms(userId),
       EmailSyncRepo.recentCoupons(userId, 50),
@@ -467,11 +531,11 @@ export const gmailService = {
       status: 200,
       body: {
         jobId: job.id,
-        scanned: result.scanned,
-        processed: result.processed,
-        added: result.programsAdded,
-        updated: result.programsUpdated,
-        couponsExtracted: result.couponsInserted,
+        status: finished.status,
+        scanned: finished.total_messages_found,
+        processed: finished.messages_processed,
+        programsUpdated: finished.programs_updated,
+        couponsExtracted: finished.coupons_extracted,
         accounts: linked,
         coupons,
       },
@@ -548,10 +612,13 @@ export const gmailService = {
     const account = await EmailSyncRepo.findByEmail(emailAddress);
     if (!account) return;
 
+    // Persist the Pub/Sub cursor before queueing so the worker resumes
+    // incrementally instead of rescanning the whole inbox.
+    if (historyId) {
+      await EmailSyncRepo.updateHistoryId(account.id, historyId);
+    }
+
     const job = await EmailSyncRepo.createJob(account.user_id, 'gmail');
-    await runScanJob(job.id, {
-      ...account,
-      history_id: historyId || account.history_id,
-    });
+    notifyJobQueued();
   },
 };

@@ -80,6 +80,16 @@ export const EmailSyncRepo = {
     );
   },
 
+  /** Advance only the Gmail history cursor (used by the Pub/Sub webhook). */
+  updateHistoryId(accountId, historyId) {
+    return query(
+      `UPDATE email_sync_accounts
+       SET history_id = $2, updated_at = NOW()
+       WHERE id = $1`,
+      [accountId, historyId]
+    );
+  },
+
   disconnect(userId, provider) {
     return query(
       `DELETE FROM email_sync_accounts WHERE user_id = $1 AND provider = $2`,
@@ -102,18 +112,85 @@ export const EmailSyncRepo = {
     );
   },
 
-  markJobFetching(jobId) {
+  /**
+   * Atomically claim the oldest queued job for this worker.
+   * FOR UPDATE SKIP LOCKED makes this safe with several API instances running
+   * workers at once: each claims a disjoint row, never the same one twice.
+   */
+  claimNextJob(workerId) {
     return query(
-      `UPDATE sync_jobs SET status = 'fetching', started_at = NOW() WHERE id = $1`,
-      [jobId]
+      `UPDATE sync_jobs
+       SET status = 'fetching',
+           worker_id = $1,
+           locked_at = NOW(),
+           started_at = COALESCE(started_at, NOW()),
+           attempt_count = attempt_count + 1
+       WHERE id = (
+         SELECT id FROM sync_jobs
+         WHERE status = 'queued'
+         ORDER BY created_at
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+       )
+       RETURNING *`,
+      [workerId]
+    ).then((r) => r.rows[0] || null);
+  },
+
+  /** Fetching is done; move to parsing and record how many messages matched. */
+  markJobParsing(jobId, totalMessages) {
+    return query(
+      `UPDATE sync_jobs
+       SET status = 'parsing', total_messages_found = $2, locked_at = NOW()
+       WHERE id = $1`,
+      [jobId, totalMessages]
     );
+  },
+
+  /** Heartbeat + live per-message progress for the mobile progress bar. */
+  updateJobProgress(jobId, processed) {
+    return query(
+      `UPDATE sync_jobs SET messages_processed = $2, locked_at = NOW() WHERE id = $1`,
+      [jobId, processed]
+    );
+  },
+
+  /**
+   * Recover jobs abandoned by a crashed or restarted worker.
+   * In-flight rows whose heartbeat is older than the cutoff go back to 'queued'
+   * until they exhaust their attempts, then are marked failed so a poison
+   * message can never spin forever.
+   */
+  requeueStaleJobs(staleAfterMinutes = 5) {
+    return query(
+      `UPDATE sync_jobs
+       SET status = CASE
+                      WHEN attempt_count >= 3 THEN 'failed'::sync_job_status
+                      ELSE 'queued'::sync_job_status
+                    END,
+           worker_id = NULL,
+           locked_at = NULL,
+           last_error = 'Worker stopped before this scan finished.',
+           error_details = CASE
+                              WHEN attempt_count >= 3
+                                THEN 'Sync failed after repeated worker interruptions.'
+                              ELSE error_details
+                            END,
+           completed_at = CASE WHEN attempt_count >= 3 THEN NOW() ELSE NULL END
+       WHERE status IN ('fetching', 'parsing')
+         AND locked_at IS NOT NULL
+         AND locked_at < NOW() - ($1 || ' minutes')::interval
+       RETURNING id`,
+      [String(staleAfterMinutes)]
+    ).then((r) => r.rowCount);
   },
 
   markJobCompleted(jobId, stats) {
     return query(
       `UPDATE sync_jobs
        SET status = 'completed', total_messages_found = $1, messages_processed = $2,
-           coupons_extracted = $3, programs_updated = $4, completed_at = NOW()
+           coupons_extracted = $3, programs_updated = $4,
+           worker_id = NULL, locked_at = NULL, completed_at = NOW()
        WHERE id = $5`,
       [stats.scanned, stats.processed, stats.couponsInserted, stats.programsUpdated, jobId]
     );
@@ -121,7 +198,10 @@ export const EmailSyncRepo = {
 
   markJobFailed(jobId, errorMessage) {
     return query(
-      `UPDATE sync_jobs SET status = 'failed', error_details = $1, completed_at = NOW() WHERE id = $2`,
+      `UPDATE sync_jobs
+       SET status = 'failed', error_details = $1, last_error = $1,
+           worker_id = NULL, locked_at = NULL, completed_at = NOW()
+       WHERE id = $2`,
       [errorMessage, jobId]
     );
   },

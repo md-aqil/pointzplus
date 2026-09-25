@@ -18,11 +18,26 @@ import { notifyPointsEarned, notifySpecialOffer } from "../services/pushNotifica
 const SYNC_JOB_POLL_INTERVAL_MS = 2_000;
 const SYNC_JOB_TIMEOUT_MS = 10 * 60 * 1_000;
 
-const SYNC_JOB_PROGRESS: Partial<Record<SyncJobStatus, { step: string; percent: number }>> = {
-  queued: { step: "Scan queued – waiting for the sync worker...", percent: 30 },
-  fetching: { step: "Searching your inbox for statements & promo tokens...", percent: 55 },
-  parsing: { step: "Extracting points & coupons from matched emails...", percent: 80 },
-  completed: { step: "Finalizing your portfolio...", percent: 92 },
+type SyncProgress = { step: string; percent: number };
+
+// During `parsing` the server reports how many messages it has handled, so the
+// bar tracks real work across the 80–92% band instead of animating blindly.
+const SYNC_JOB_PROGRESS: Partial<Record<SyncJobStatus, (job: SyncJob) => SyncProgress>> = {
+  queued: () => ({ step: "Scan queued – waiting for the sync worker...", percent: 30 }),
+  fetching: () => ({ step: "Searching your inbox for statements & promo tokens...", percent: 55 }),
+  parsing: (job) => {
+    const total = Number(job.total_messages_found) || 0;
+    const done = Number(job.messages_processed) || 0;
+    const ratio = total > 0 ? Math.min(1, done / total) : 0;
+    return {
+      step:
+        total > 0
+          ? `Extracting points & coupons (${done}/${total})…`
+          : "Extracting points & coupons from matched emails...",
+      percent: 80 + Math.round(ratio * 12),
+    };
+  },
+  completed: () => ({ step: "Finalizing your portfolio...", percent: 92 }),
 };
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -60,7 +75,7 @@ function mapBackendAccount(a: BackendLinkedAccount): LinkedAccount {
  */
 async function pollSyncJob(
   jobId: string,
-  onStatus: (status: SyncJobStatus) => void
+  onStatus: (job: SyncJob) => void
 ): Promise<SyncJob> {
   const deadline = Date.now() + SYNC_JOB_TIMEOUT_MS;
 
@@ -81,7 +96,7 @@ async function pollSyncJob(
       return job;
     }
 
-    onStatus(job.status);
+    onStatus(job);
     await delay(SYNC_JOB_POLL_INTERVAL_MS);
   }
 
@@ -460,9 +475,12 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       // The Gmail fetch + parse runs server-side as a job. Queuing returns in
       // milliseconds, so the HTTP request never blocks the UI thread.
       const { jobId } = await apiClient.queueEmailScan(provider);
-      const job = await pollSyncJob(jobId, (status) => {
-        const phase = SYNC_JOB_PROGRESS[status];
-        if (phase) handleProgress(phase.step, phase.percent);
+      const job = await pollSyncJob(jobId, (current) => {
+        const phase = SYNC_JOB_PROGRESS[current.status];
+        if (phase) {
+          const { step, percent } = phase(current);
+          handleProgress(step, percent);
+        }
       });
 
       handleProgress("Refreshing your portfolio...", 90);

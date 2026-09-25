@@ -39,6 +39,10 @@ echo "Adding coupons, tokens, sync jobs, security columns & slugs..."
 psql -d pointzplus -f "$MIGRATIONS_DIR/20260915_003_coupons_and_sync_jobs.sql"
 psql -d pointzplus -f "$MIGRATIONS_DIR/20260915_004_security_and_slugs.sql"
 
+echo ""
+echo "Adding sync job queue columns (claiming, heartbeat, retries)..."
+psql -d pointzplus -f "$MIGRATIONS_DIR/20260915_005_sync_job_queue.sql"
+
 
 echo ""
 echo "=== Database Setup Complete ==="

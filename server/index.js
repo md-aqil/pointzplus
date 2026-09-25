@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { pool, testConnection } from './db.js';
+import { startSyncWorker, stopSyncWorker } from './workers/syncWorker.js';
 import { errorHandler, notFoundHandler } from './lib/errors.js';
 import { rateLimit } from './lib/rateLimit.js';
 import authRoutes from './routes/auth.js';
@@ -87,9 +88,29 @@ async function startServer() {
     process.exit(1);
   }
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`PointzPlus API server listening on http://localhost:${PORT} (db: connected)`);
   });
+
+  // Background Gmail sync worker. Jobs are claimed from sync_jobs with
+  // FOR UPDATE SKIP LOCKED, so extra API instances can each run their own
+  // worker without ever double-processing a job.
+  if (process.env.SYNC_WORKER_ENABLED !== 'false') {
+    startSyncWorker();
+  }
+
+  // Stop accepting connections and stop polling for work. Any job already
+  // in flight is recovered by the stale-lock reaper on the next boot.
+  const shutdown = (signal) => {
+    console.log(`\n${signal} received – shutting down gracefully`);
+    stopSyncWorker();
+    server.close(() => process.exit(0));
+    // Don't hang forever on a stuck connection.
+    setTimeout(() => process.exit(0), 10_000).unref();
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 startServer();
