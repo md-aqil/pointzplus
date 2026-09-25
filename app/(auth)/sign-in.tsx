@@ -45,7 +45,14 @@ export default function SignInScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(tabs)/home");
     } catch (err) {
-      setError("Invalid credentials. Please try again.");
+      // Keep credential failures friendly, but let transport problems (wrong
+      // API host, server down) explain themselves so they can be fixed.
+      const message = err instanceof Error ? err.message : "";
+      setError(
+        message && /cannot reach|network|failed to fetch/i.test(message)
+          ? message
+          : "Invalid credentials. Please try again."
+      );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);

@@ -78,7 +78,13 @@ export default function RegisterScreen() {
       router.replace("/(tabs)/home");
     } catch (err) {
       setLoading(false);
-      setError("Registration failed. Please try again.");
+      // Surface the real reason (duplicate email, weak password, unreachable
+      // API) instead of a generic message that hides the actual cause.
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : "Registration failed. Please try again."
+      );
     }
   };
 

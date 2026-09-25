@@ -1,9 +1,21 @@
 // lib/apiClient.ts – Local PostgreSQL API Client
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import type { BackendLinkedAccount, SyncJob } from '../types/models';
 
-// Local server URL (defaults to localhost:3001 for web & simulator)
-const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001/api';
+// Inside an Android emulator, `localhost` refers to the emulator itself, so
+// requests to the dev machine fail with a connection error. The emulator
+// reaches the host loopback through 10.0.2.2 instead. iOS simulators and web
+// can use the host loopback directly.
+//
+// A physical Android device needs your computer's LAN IP, so set
+// EXPO_PUBLIC_API_URL explicitly in .env for that case.
+const DEFAULT_API_HOST = Platform.select({
+  android: '10.0.2.2', // Android emulator -> host machine
+  default: 'localhost', // iOS simulator + web
+});
+
+const API_BASE = process.env.EXPO_PUBLIC_API_URL || `http://${DEFAULT_API_HOST}:3001/api`;
 
 const TOKEN_STORAGE_KEY = 'pointzplus_auth_token';
 
@@ -46,14 +58,32 @@ class ApiClient {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${this.token}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers,
+      });
+    } catch (err) {
+      // A transport failure is almost always a wrong/unreachable API host.
+      // Say so explicitly instead of surfacing an opaque "Network request
+      // failed", which is impossible to diagnose from the UI.
+      const reason = err instanceof Error ? err.message : 'unknown transport error';
+      throw new Error(
+        `Cannot reach the PointzPlus API at ${API_BASE} (${reason}). ` +
+          `Android emulator: use http://10.0.2.2:3001/api. ` +
+          `Physical device: use your computer's LAN IP. ` +
+          `iOS simulator / web: use http://localhost:3001/api.`
+      );
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}`);
+      const message =
+        typeof error.error === 'string'
+          ? error.error
+          : (error.error?.message ?? `Request failed (HTTP ${response.status})`);
+      throw new Error(message);
     }
 
     return response.json();
