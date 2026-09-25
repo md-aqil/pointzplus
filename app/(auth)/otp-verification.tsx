@@ -19,7 +19,7 @@ import { ScreenHeader } from "../../components/ui/ScreenHeader";
 export default function OtpVerificationScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const email = (params.email as string) || "davinder2038@gmail.com";
+  const email = (params.email as string) || "";
 
   const [otp, setOtp] = useState("");
   const [countdown, setCountdown] = useState(20);

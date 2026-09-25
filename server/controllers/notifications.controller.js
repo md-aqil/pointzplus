@@ -28,7 +28,11 @@ export const notificationsController = {
   }),
 
   expiringAlerts: asyncHandler(async (req, res) => {
-    res.json(await notificationsService.expiringAlerts(req.userId));
+    const days = Number.parseInt(String(req.query.days || ''), 10);
+    res.json(await notificationsService.expiringAlerts(
+      req.userId,
+      Number.isFinite(days) ? Math.min(Math.max(days, 1), 365) : 90
+    ));
   }),
 
   history: asyncHandler(async (req, res) => {
@@ -38,6 +42,10 @@ export const notificationsController = {
 
   acknowledge: asyncHandler(async (req, res) => {
     res.json(await notificationsService.acknowledge(req.userId, req.params.id));
+  }),
+
+  recordAlert: asyncHandler(async (req, res) => {
+    res.json(await notificationsService.recordAlert(req.userId, req.body));
   }),
 
   checkExpiry: asyncHandler(async (req, res) => {

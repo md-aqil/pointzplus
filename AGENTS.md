@@ -93,4 +93,4 @@ pointzplus-mobile/
   - `alert`: `#FF4343` / `#FFF6F6`
   - `borderLight`: `#E6E6E8`
 - **Typography**: `Plus Jakarta Sans` across all headings, body, labels, and CTAs (weights 400, 500, 600, 700).
-- **Backend Architecture**: Local PostgreSQL database integration (do not use Supabase).
+- **Backend Architecture**: Local PostgreSQL database accessed through the Express API in `server/` (no third-party BaaS).

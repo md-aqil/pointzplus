@@ -14,6 +14,7 @@ export interface NotificationItem {
   id: string;
   title: string;
   description: string;
+  /** Human-readable timestamp used by the notification card. */
   timestamp: string;
   dateGroup: string;
   isRead: boolean;

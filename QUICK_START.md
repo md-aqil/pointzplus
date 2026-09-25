@@ -1,167 +1,182 @@
-# ⚡ PointzPlus MVP – Quick Start (5 Minutes)
+# ⚡ PointzPlus – Quick Start (Real Data)
 
-## Step 1: Start the App
+PointzPlus displays **only real data**. Every number on screen comes from your local
+PostgreSQL database through the Express API in `server/`. There is no seeded demo
+account, no mock portfolio, and no in-memory fallback: if the database has no rows for
+you, the screens show an empty state.
+
+---
+
+## Step 1: Create the database (once)
+
 ```bash
 cd pointzplus-mobile
+./setup-database.sh
+```
+
+Or manually:
+
+```bash
+createdb pointzplus
+psql -d pointzplus -f server/db/migrations/20260915_001_init.sql
+psql -d pointzplus -f server/db/migrations/20260915_002_seed_programs.sql
+psql -d pointzplus -f server/db/migrations/20260915_003_coupons_and_sync_jobs.sql
+psql -d pointzplus -f server/db/migrations/20260915_004_security_and_slugs.sql
+```
+
+> `002_seed_programs.sql` seeds the **loyalty-programme catalogue** (InterMiles,
+> Marriott, HDFC, … with their point values) — it does **not** create balances for you.
+> Your linked accounts start empty and only ever come from you (manual add, email sync,
+> SMS detection).
+
+## Step 2: Configure and start the API
+
+```bash
+cd server
+cp .env.example .env
+# Set DB_PASSWORD and generate JWT_SECRET:  openssl rand -hex 32
+npm install
+npm start
+```
+
+Verify the API is up:
+
+```bash
+curl http://localhost:3001/health
+# {"status":"ok","database":"connected", ...}
+```
+
+## Step 3: Point the app at the API
+
+Root `.env`:
+
+```
+EXPO_PUBLIC_API_URL=http://localhost:3001/api
+```
+
+- iOS simulator / web: `http://localhost:3001/api`
+- Android emulator: `http://10.0.2.2:3001/api`
+- Physical device: `http://<your-LAN-IP>:3001/api`
+
+## Step 4: Start the app
+
+```bash
 npx expo start
 ```
 
-## Step 2: Choose Your Platform
-- **Web (Fastest):** Press `w`
-- **Android Emulator:** Press `a`
-- **iOS Simulator:** Press `i`
-- **Physical Device:** Scan QR code with Expo Go app
+Press `w` (web), `a` (Android), `i` (iOS), or scan the QR code with Expo Go.
 
 ---
 
-## What You'll See on Home Screen
+## What You'll See
 
-### Real Data Already Loaded
+### First run — empty, on purpose
+
+Register, then sign in. The store starts empty (the API returns no accounts for a new
+user), so Home shows the empty state rather than invented numbers:
+
 ```
 Welcome Back
-Davinder singh
+<your name>
 
 ┌─────────────────────────────────┐
 │  Total Points Portfolio         │
-│  40,437 pts                     │
-│  ₹15,287 estimated value        │
-│                                 │
-│  +697 earned    5,000 expiring  │
+│  0 pts                          │
+│  ₹0 estimated value             │
 └─────────────────────────────────┘
 
-Points by category
-[Airlines] [Hotels] [Banking] [Retail] [Health]
-
-Linked Programs (7 Active)
-┌─────────────────────────────────┐
-│ ✈️ InterMiles airline            │
-│    11,450 pts                   │
-│    ⚠️  2,500 expire 18 Aug 2026  │
-├─────────────────────────────────┤
-│ 🇮🇳 Air India Flying Returns     │
-│    4,318 pts                    │
-│    ⚠️  588 expire 30 Sep 2026    │
-├─────────────────────────────────┤
-│ 🏨 Marriott Bonvoy              │
-│    3,500 pts                    │
-│    ⚠️  1,000 expire 15 Oct 2026  │
-├─────────────────────────────────┤
-│ 💎 Hilton Honors                │
-│    2,280 pts                    │
-├─────────────────────────────────┤
-│ 💳 HDFC Regalia / Infinia Points │
-│    9,150 pts                    │
-├─────────────────────────────────┤
-│ 🛍️  Flipkart SuperCoins          │
-│    8,450 pts                    │
-│    ⚠️  500 expire 31 Dec 2026    │
-├─────────────────────────────────┤
-│ 💪 Cult.fit FitCoins            │
-│    1,289 pts                    │
-│    ⚠️  412 expire 30 Nov 2026    │
-└─────────────────────────────────┘
+No Loyalty Programs Yet
+[ + Add Program ]    [ Email Sync ]
 ```
 
----
+### After you add an account
 
-## Test Each Feature (2 Min Each)
-
-### ✨ Test 1: Email Sync
-**Time:** ~90 seconds
-
-1. **On Home screen, scroll down** and tap the **Email Sync** button (or go to Profile tab → "Email Auto-Sync")
-2. **Tap "Connect with Google Gmail"**
-3. **Watch the progress bar:**
-   - 20% → "Connecting to Google Gmail OAuth..."
-   - 45% → "Searching inbox for loyalty statements..."
-   - 75% → "Extracting reward balances..."
-   - 90% → "Normalizing points data..."
-   - 100% → "Sync complete!"
-4. **Success modal appears:** "Email Sync Complete! Discovered Programs: 5 Active"
-5. **Tap "View Updated Dashboard"** → back to Home
-
-**What happened:**
-- System scanned 5 mock email statements
-- Parsed account numbers, balances, expiry dates via regex
-- Auto-added InterMiles, Air India, Marriott, HDFC, Flipkart to your wallet
-- All data instantly appears on Home (thanks to Zustand store)
+Home renders exactly what `GET /api/accounts` returns for **your** user — no fallback,
+no placeholders. Portfolio value is computed server-side as
+`SUM(current_balance × point_value_inr)`.
 
 ---
 
-### ✨ Test 2: Manual Add Program
+## Test Each Feature
+
+### ✨ Test 1: Create an account and sign in
 **Time:** ~60 seconds
 
-1. **On Home screen, tap the floating "+" button** (bottom right) or go to Profile → "Add Program"
-2. **Select Category:** Tap "Banking"
-3. **Pick Brand:** Scroll down, tap "SBI Card Reward Points"
-4. **Fill Form:**
+1. Open the app → **Sign up** (email + password).
+2. Verify OTP. (In development the flow completes locally; production builds never
+   fake a success — they tell you email delivery isn't wired yet.)
+3. Sign in with the same credentials.
+
+**Why this matters:** every read and write is authenticated with a JWT issued by the
+API. The token is stored in SecureStore and re-validated on each cold start
+(`app/_layout.tsx` → `restoreSession()` → `GET /api/auth/verify`).
+
+**What you should see:** Home with the **empty state (0 pts)**. That is correct — the
+database now has a user, but that user has no linked accounts yet.
+
+---
+
+### ✨ Test 2: Add a program manually (a real database write)
+**Time:** ~60 seconds
+
+1. Home → **+ Add Program** (or Profile → "Add Program")
+2. **Category:** Banking → **Brand:** SBI Card Reward Points
+3. **Fill the form:**
    - Account: `****2891`
    - Points: `18500`
    - Expiring: `3500`
-   - Expiry Window: `45 Days`
-5. **Tap "Save to PointzPlus Wallet"**
-6. **Success modal:** "Account Added! SBI Card Reward Points..."
-7. **Tap "Back to Dashboard"**
+   - Expiry: any date inside the next 45 days
+4. **Save to PointzPlus Wallet**
 
-**What happened:**
-- New account created instantly
-- Added to Zustand store
-- Home re-renders, shows SBI card in list
-- Portfolio value updates (+₹4,625)
-- No page refresh needed (real-time)
+**The actual request:**
+
+```
+POST /api/accounts
+{ "programId": "<sbi-uuid>", "accountNumberMasked": "****2891",
+  "currentBalance": 18500, "expiringPoints": 3500, "expiryDate": "..." }
+```
+
+The row is inserted into PostgreSQL (`linked_accounts`), the store refetches, and Home
+re-renders. Portfolio value becomes `18500 × point_value_inr` using the catalogue row.
+
+**Prove it's real:** reload the page or restart the app — the account is still there,
+because it lives in the database, not in memory.
 
 ---
 
-### ✨ Test 3: View Analytics
+### ✨ Test 3: Portfolio overview (computed from your real rows)
 **Time:** ~45 seconds
 
-1. **On Home screen, tap the dark Points Card** (the top banner showing "40,437 pts")
-2. **Overview screen opens** showing:
-   - 📊 **Portfolio Value:** ₹15,287 (or updated if you added programs)
-   - 📈 **Statistics:**
-     - Earned This Month: +697 pts
-     - Expiring Soon: 5,000 pts
-     - Categories: 5
-   - 📉 **Category Breakdown:**
-     ```
-     Airlines    15,768 pts  ████████████ 40%
-     Hotels       5,780 pts  ███░░░░░░░░░ 15%
-     Banking      9,150 pts  ██████░░░░░░ 23%
-     Retail       8,450 pts  █████░░░░░░░ 21%
-     Health       1,289 pts  █░░░░░░░░░░░  3%
-     ```
-   - 🚨 **Expiring Soon Section:** Red alerts for all expiring accounts
+1. Home → tap the dark **Total Points** card.
+2. Overview shows figures derived entirely from your own `linked_accounts` rows:
+   - Portfolio value = `Σ(current_balance × point_value_inr)`
+   - Earned / redeemed this month from `points_transactions`
+   - Category breakdown with percentage bars
+   - Expiring section driven by `expiring_points` / `expiry_date`
 
-3. **Tap back to Home**
+**With only the one account from Test 2 expect:** a single Banking category at 100% —
+not a pre-filled five-category chart. Percentages only reflect what you actually own.
 
 ---
 
-### ✨ Test 4: Profile Portfolio
+### ✨ Test 4: Profile
 **Time:** ~30 seconds
 
-1. **Tap "Profile" tab** (bottom navigation)
-2. **Scroll to "Loyalty Portfolio" widget:**
-   ```
-   Loyalty Portfolio
-   7 Active
-   
-   Total Points        Est. Value
-   40,437              ₹15,287
-   
-   [+ Add Program] [View Breakdown]
-   ```
-3. **Check "Data Sync & Integration" section:**
-   - ✅ Email Auto-Sync: "Connected via gmail"
-   - ➕ Manual Add Program: "Add programs manually..."
+1. **Profile** tab.
+2. The **Loyalty Portfolio** widget shows your real totals and active-account count.
+3. **Data Sync & Integration** lists your actual connections — nothing reads
+   "Connected" unless a real `email_sync_accounts` row exists for your user.
 
 ---
 
-### ✨ Test 5: Live Refresh
-**Time:** ~20 seconds
+### ✨ Test 5: Refresh and persistence
+**Time:** ~30 seconds
 
-1. **On Home screen, pull down to refresh**
-2. **Data reloads** (mock data persists during session)
-3. **All programs still visible**
+1. On Home, **pull down to refresh** → `refreshAll()` re-fetches accounts, coupons and
+   notification history from the API (watch the spinner while the requests are in flight).
+2. Kill the app and reopen it → your data is unchanged, because PostgreSQL holds it.
+3. Optional proof: `psql -d pointzplus -c "SELECT current_balance FROM linked_accounts;"` —
+   the balance you entered in Test 2 is there.
 
 ---
 
@@ -169,43 +184,44 @@ Linked Programs (7 Active)
 
 | Feature | Where | How It Works |
 |---------|-------|-------------|
-| **Real Data** | Home, Overview, Profile | Comes from Zustand `pointsStore` (not hardcoded) |
-| **Email Sync** | `/email-sync` screen | Regex parser extracts data from mock emails, auto-imports 5 programs |
-| **Manual Add** | `/add-account` screen | Form validation with Zod, instant store update, no backend needed |
-| **Live Updates** | All screens | usePoints() hook re-computes selectors when store changes |
-| **Portfolio Value** | Overview, Profile | Calculated as `totalPoints × pointValueINR` per program |
-| **Expiry Alerts** | Home, Overview | Red badges showing days/dates when points expire |
-| **Empty State** | Home (first run) | Shows "No Loyalty Programs Yet" with Add/Sync buttons |
+| **All data** | Home, Overview, Profile, Notifications | Fetched per user from the local API (`lib/apiClient.ts`); the store starts empty |
+| **Manual add** | `/add-account` | Zod-validated form → `POST /api/accounts` → row in `linked_accounts` |
+| **Email sync** | `/email-sync` | Real Gmail OAuth → `POST /api/email-sync/scan`; failures surface as errors, never invented rows |
+| **SMS detection** | Android | `POST /api/sms/detect` parses real bank SMS |
+| **Portfolio value** | Overview, Profile | `Σ(current_balance × point_value_inr)` over your own rows |
+| **Expiry alerts** | Home, Overview | Driven by real `expiring_points` / `expiry_date`, mirrored to `expiry_alerts` |
+| **Empty state** | Home (first run) | Correct behaviour for a user with no accounts yet |
+| **Persistence** | Everywhere | PostgreSQL — survives reloads, restarts and reinstalls |
 
 ---
 
 ## 🚀 What You're Actually Testing
 
-### Data Layer (All Real)
-- ✅ 7 pre-seeded loyalty accounts in Zustand
-- ✅ Email sync extracts from 5 mock statements
-- ✅ Manual add validates and persists to store
-- ✅ Computed selectors recalculate on every store update
+### Data Layer (PostgreSQL, scoped to your user)
+- ✅ Accounts you create are rows in `linked_accounts` (owned by your `user_id`)
+- ✅ Email sync writes accounts and `extracted_coupons` from your real mailbox
+- ✅ Notification history comes from `expiry_alerts`
+- ✅ No code path seeds user data — not the app, not the migrations
 
-### UI Layer (All Connected)
-- ✅ Home reads from `usePoints()` hook
-- ✅ Overview calculates portfolio value & categories in real-time
-- ✅ Profile widget shows live summary
-- ✅ All screens sync instantly (no page refresh)
+### UI Layer
+- ✅ Screens read from `usePoints()` / the store, which mirrors API responses
+- ✅ Selectors recompute on every store update
+- ✅ Pull-to-refresh re-fetches from the API
 
-### Type Safety (Zod + TypeScript)
-- ✅ AddProgramFormValues validated with Zod schema
-- ✅ LinkedAccount, CategorySummary types enforce structure
-- ✅ API layer ready for Supabase/backend swap
+### Type Safety
+- ✅ Forms validated with Zod
+- ✅ `LinkedAccount`, `CategorySummary`, `NotificationItem` types enforce shape
+- ✅ Strict TypeScript across the app and the API client
 
 ---
 
 ## 📌 Remember
 
-- **Web preview:** Fastest way to test (no build needed)
-- **Mock data persists:** Until you close the browser/app
-- **Real on restart:** Data resets when you refresh (in-memory store)
-- **Phase 2 integration:** When you add Supabase, persistence becomes real
+- **Everything you see is yours** — a fresh user starts at 0 pts by design
+- **Only the programme catalogue is seeded** (`002_seed_programs.sql`)
+- **Persistence is real:** reload, restart or reinstall and your data is still there
+- **Local simulation was removed** from the email-sync path, so a sync can only ever
+  reflect a real mailbox
 
 ---
 
@@ -213,22 +229,21 @@ Linked Programs (7 Active)
 
 | Issue | Solution |
 |-------|----------|
-| "Web bundling failed" | Try `npx expo export --platform web` first |
-| Empty home screen | Click "Email Sync" or "+ Add Program" to populate |
-| Progress bar stuck | Reload page (hard refresh) or restart Expo |
-| Styles look broken | Clear `node_modules`, run `npm install --legacy-peer-deps` |
-| TypeScript errors | Run `npx tsc --noEmit` to see exact line issues |
+| Empty Home screen | Expected until you add an account or connect a mailbox |
+| `401 Unauthorized` | Session expired — sign in again |
+| `Cannot reach API` | Is `server/` running? Check `curl localhost:3001/health` |
+| Android emulator can't connect | Use `http://10.0.2.2:3001/api`, not `localhost` |
+| No brands to pick | Re-run `psql -d pointzplus -f server/db/migrations/20260915_002_seed_programs.sql` |
+| "Sync failed" | Real Gmail OAuth isn't configured — set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` |
+| TypeScript errors | `npx tsc --noEmit` |
 
 ---
 
 ## 🎉 You're Ready!
 
-Start Expo, press `w` for web, and explore. Everything you see is **real working code**, not demos or screenshots.
+Everything in the app is real working code backed by your own database — no demos, seeded
+portfolios or screenshots.
 
-**Questions?** Check `MVP_PHASE_1.md` or `IMPLEMENTATION_COMPLETE.md` for full documentation.
-
-**Ready to build Phase 2?** When you are, we'll wire Supabase (real backend) and real Gmail/Outlook OAuth.
-
----
+**Questions?** See `PHASE_2_COMPLETE.md` (architecture) and `AGENTS.md` (conventions).
 
 **Happy testing! 🚀**

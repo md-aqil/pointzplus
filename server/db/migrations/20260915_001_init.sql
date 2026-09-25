@@ -1,4 +1,4 @@
--- supabase/migrations/20260915_001_init.sql
+-- server/db/migrations/20260915_001_init.sql
 -- PointzPlus Phase 2: Complete Database Schema (Local PostgreSQL Compatible)
 
 -- ─── Enable Extensions ──────────────────────────────────────

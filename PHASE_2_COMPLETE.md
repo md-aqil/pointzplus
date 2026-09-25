@@ -5,7 +5,7 @@
 ### 1. Local PostgreSQL Database
 - **Full schema** with 10 tables for users, accounts, programs, transactions, email sync, SMS, notifications
 - **Seed data** for 24+ popular loyalty programs (airlines, hotels, banks, shopping, food, etc.)
-- Located in: `supabase/migrations/`
+- Located in: `server/db/migrations/`
 
 ### 2. Express API Server (Local)
 A complete REST API server at `server/`:
@@ -19,7 +19,8 @@ A complete REST API server at `server/`:
 
 ### 3. API Client for Mobile App
 - `lib/apiClient.ts` - Complete TypeScript client connecting to local API
-- Replaces mock data with real database calls
+- Persists every read and write to your local PostgreSQL database — no seeded or
+  in-memory sample data anywhere in the app
 
 ### 4. Android SMS Detection
 - `services/smsDetector.ts` - Regex-based SMS parser for loyalty points
@@ -43,8 +44,8 @@ A complete REST API server at `server/`:
 createdb pointzplus
 
 # Run migrations
-psql -d pointzplus -f supabase/migrations/20260915_001_init.sql
-psql -d pointzplus -f supabase/migrations/20260915_002_seed_programs.sql
+psql -d pointzplus -f server/db/migrations/20260915_001_init.sql
+psql -d pointzplus -f server/db/migrations/20260915_002_seed_programs.sql
 ```
 
 ### Step 2: Configure Environment
@@ -86,6 +87,11 @@ pointzplus-mobile/
 ├── server/                          # Express API Server
 │   ├── index.js                    # Main server entry
 │   ├── db.js                       # PostgreSQL connection
+│   ├── db/migrations/              # Database schema
+│   │   ├── 20260915_001_init.sql
+│   │   ├── 20260915_002_seed_programs.sql
+│   │   ├── 20260915_003_coupons_and_sync_jobs.sql
+│   │   └── 20260915_004_security_and_slugs.sql
 │   ├── package.json
 │   └── routes/
 │       ├── auth.js                 # Authentication
@@ -95,13 +101,8 @@ pointzplus-mobile/
 │       ├── sms.js                  # SMS detection
 │       └── notifications.js        # Push notifications
 │
-├── supabase/migrations/             # Database schema
-│   ├── 20260915_001_init.sql     # 10 tables
-│   └── 20260915_002_seed_programs.sql
-│
 ├── lib/
-│   ├── apiClient.ts               # API client for mobile
-│   └── supabase.ts                # (backup if needed)
+│   └── apiClient.ts               # API client for mobile
 │
 ├── services/
 │   ├── smsDetector.ts            # Android SMS parser

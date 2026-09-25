@@ -103,18 +103,39 @@ export const NotificationsRepo = {
     ).then((r) => r.rows[0] || null);
   },
 
-  /** All user accounts with points expiring inside the alert window (cron). */
+  /** Ownership check for client-reported alerts (prevents cross-user writes). */
+  accountForUser(userId, accountId) {
+    return query(
+      'SELECT id FROM linked_accounts WHERE id = $1 AND user_id = $2',
+      [accountId, userId]
+    ).then((r) => r.rows[0] || null);
+  },
+
+  /**
+   * Accounts with points expiring inside *their owner's* alert window (cron).
+   * Honors each user's `expiry_warning_days` (widest threshold wins) and skips
+   * users who turned expiry alerts off.
+   */
   accountsNeedingAlerts() {
     return query(`
       SELECT
         la.user_id, la.id as account_id, la.expiring_points, la.expiry_date,
-        lp.name as program_name
+        lp.name as program_name,
+        COALESCE(pns.expiry_warning_days, '{15,30,45,90}'::int[]) AS expiry_warning_days
       FROM linked_accounts la
       JOIN loyalty_programs lp ON la.program_id = lp.id
+      LEFT JOIN push_notification_settings pns ON pns.user_id = la.user_id
       WHERE la.is_active = true
         AND la.expiring_points > 0
         AND la.expiry_date IS NOT NULL
-        AND la.expiry_date BETWEEN NOW() AND NOW() + INTERVAL '90 days'
+        AND COALESCE(pns.expiry_alerts_enabled, true) = true
+        AND la.expiry_date >= NOW()
+        AND la.expiry_date <= NOW() + (
+          COALESCE(
+            (SELECT MAX(d) FROM unnest(COALESCE(pns.expiry_warning_days, '{15,30,45,90}'::int[])) AS d),
+            90
+          )::text || ' days'
+        )::interval
     `).then((r) => r.rows);
   },
 
@@ -132,8 +153,9 @@ export const NotificationsRepo = {
     return query(
       `INSERT INTO expiry_alerts (
          user_id, linked_account_id, alert_type, points_at_risk, sent_push_notification
-       ) VALUES ($1, $2, $3, $4, false)`,
+       ) VALUES ($1, $2, $3, $4, false)
+       RETURNING id`,
       [userId, accountId, alertType, pointsAtRisk]
-    );
+    ).then((r) => r.rows[0] || null);
   },
 };

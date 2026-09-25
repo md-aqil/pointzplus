@@ -1,11 +1,15 @@
 # 🚀 PointzPlus MVP – Phase 1: Email Sync + Manual Tracker
 
+> ⚠️ **HISTORICAL (Phase 1).** Written when the app ran on an in-memory store with bundled
+> sample emails. The sample-statement simulator has been removed and user data now lives in
+> PostgreSQL via the API. See `QUICK_START.md` and `PHASE_2_COMPLETE.md` for current state.
+
 ## Overview
 
 **PointzPlus** is a fully functional **loyalty points aggregator** built with:
-- ✅ **Zustand Store** — Real data state management (no dummy constants on UI)
-- ✅ **Email Sync Engine** — Gmail/Outlook OAuth with statement parsing
-- ✅ **Manual Tracker** — Add programs manually or scan receipts/statements
+- ✅ **Zustand Store** — Mirror of the API response (starts empty for a new user)
+- ✅ **Email Sync Engine** — Gmail OAuth with server-side statement parsing
+- ✅ **Manual Tracker** — Add programs manually; writes go to the API
 - ✅ **Live Dashboard** — All screens display actual pointsStore data
 - ✅ **20+ Popular Programs** — Airlines, hotels, banks, shopping, food, more
 
@@ -32,7 +36,7 @@
 │         DATA SERVICES (emailParser.ts)                  │
 │  • EmailSyncService.parseEmailStatement()              │
 │  • STATEMENT_PARSER_RULES (20+ program patterns)       │
-│  • MOCK_RAW_EMAILS (instant demo data)                 │
+│  • MOCK_RAW_EMAILS (removed – unreferenced)            │
 ├─────────────────────────────────────────────────────────┤
 │              TYPE SAFETY (types/loyalty.ts)            │
 │  • LinkedAccount, EmailSyncAccount, DashboardSummary   │
@@ -53,9 +57,9 @@
 
 ### Email Sync Screen (`/email-sync`)
 **Step 1:** Click "Gmail" or "Outlook"  
-**Step 2:** System connects via OAuth (simulated with MOCK_RAW_EMAILS)  
-**Step 3:** Email parser scans inbox for loyalty statements  
-**Step 4:** Extracts 5-6 programs automatically  
+**Step 2:** System connects via real Gmail/Outlook OAuth  
+**Step 3:** Email parser scans your inbox for loyalty statements  
+**Step 4:** Extracts whichever programs you actually receive mail from  
 **Step 5:** Shows success modal → data appears on Home  
 
 **What happens behind the scenes:**
@@ -176,7 +180,7 @@ Home component re-renders
 | File | Purpose |
 |------|---------|
 | `store/pointsStore.ts` | **Central Zustand state** — all accounts, sync actions, selectors |
-| `services/emailParser.ts` | **Email parsing logic** — regex patterns, mock statements, OAuth sim |
+| `services/emailParser.ts` | **Email parsing logic** — regex patterns for real statements (the bundled sample-statement simulator was removed) |
 | `types/loyalty.ts` | **Type safety** — LinkedAccount, DashboardSummary, Zod schemas |
 | `constants/popularPrograms.ts` | **20+ program catalog** — names, colors, point values, expiry rules |
 | `hooks/usePoints.ts` | **React hook** — wraps pointsStore for components |
@@ -215,33 +219,31 @@ Home component re-renders
 
 ## 🔌 Backend Integration (Phase 2)
 
-When you're ready to connect a real backend:
+### What is already wired (Phase 2 shipped)
 
-1. **Replace mock emails** in `emailParser.ts`:
+1. **Real Gmail/Outlook fetch** — the server does the OAuth and inbox scan:
    ```typescript
-   // Replace MOCK_RAW_EMAILS with real Gmail/Outlook API calls
-   const emails = await gmailApi.searchThreads(query, maxResults);
-   const parsed = emails.map(email => parseEmailStatement(...));
+   // server/services/gmail.service.js fetches via the Gmail API;
+   // the client only calls the API and shows progress.
+   const result = await apiClient.startEmailSync('google');
+   ```
+2. **Persist to PostgreSQL** — already the default path:
+   ```typescript
+   const saved = await apiClient.addAccount({
+     programId: account.programId,
+     accountNumberMasked: account.accountNumberMasked,
+     currentBalance: account.currentBalance,
+     expiringPoints: account.expiringPoints,
+     expiryDate: account.expiryDate ?? undefined,
+   });
+   ```
+3. **Refresh from the API**:
+   ```typescript
+   await usePointsStore.getState().refreshAll();
    ```
 
-2. **Persist to PostgreSQL**:
-   ```typescript
-   // Replace pointsStore.set() with:
-   const saved = await supabase
-     .from('linked_accounts')
-     .insert(linkedAccounts)
-     .select();
-   ```
-
-3. **Add realtime sync**:
-   ```typescript
-   const subscription = supabase
-     .from('linked_accounts')
-     .on('*', (payload) => {
-       pointsStore.updateAccount(...);
-     })
-     .subscribe();
-   ```
+Still worth doing: real Outlook/Microsoft OAuth credentials, and running the Gmail
+sync on a background worker rather than on the HTTP request.
 
 ---
 
@@ -258,22 +260,23 @@ When you're ready to connect a real backend:
 
 ---
 
-## 🚨 Known Limitations (MVP)
+## 🚨 Known Limitations (this was the original MVP; most are now fixed)
 
-- Email sync is **simulated** (uses mock data, not real OAuth)
-- Android SMS reader **not implemented** (Phase 2)
-- Plaid / API aggregators **not implemented** (Phase 3)
-- Push notifications **not wired** (Phase 2)
-- No real backend (all data in-memory, resets on refresh)
+- ~~Email sync is simulated~~ → **fixed**: real Gmail OAuth, server-side inbox scan
+- ~~No real backend (all data in-memory)~~ → **fixed**: local PostgreSQL via the Express API
+- Android SMS reader was Phase 2 → **shipped** as `services/smsDetector.ts`
+- Push notifications were Phase 2 → **shipped** as `services/pushNotifications.ts`
+- Plaid / third-party aggregators **not implemented** (not planned)
+- Gmail sync still runs on the HTTP request, not a background worker
 
 ---
 
 ## 📖 Next Steps
 
-1. **Deploy to Expo Go** — Test on real Android device
-2. **Wire Supabase** — Replace in-memory store with PostgreSQL
-3. **Implement real Gmail/Outlook OAuth** — Replace mock parser with actual API
-4. **Add SMS Reader** — Auto-detect points from bank transaction SMS
+1. **Deploy to Expo Go** — Test on a real Android device
+2. **Add real Outlook/Microsoft OAuth** credentials
+3. **Move Gmail sync onto a background worker** so it can't block the request
+4. **Add automated tests** (unit, API, E2E) and CI
 5. **Build web dashboard** — For desktop power users
 
 ---

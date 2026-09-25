@@ -1,6 +1,5 @@
 // lib/apiClient.ts – Local PostgreSQL API Client
 import * as SecureStore from 'expo-secure-store';
-import { useAuthStore } from '../store/authStore';
 
 // Local server URL (defaults to localhost:3001 for web & simulator)
 const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001/api';
@@ -272,18 +271,40 @@ class ApiClient {
     });
   }
 
-  async getExpiryAlerts() {
-    return this.request<any[]>('/notifications/expiry');
+  async getExpiryAlerts(days?: number) {
+    const query = days !== undefined ? `?days=${Math.max(1, Math.min(days, 365))}` : '';
+    return this.request<any[]>(`/notifications/expiry${query}`);
   }
 
-  async getNotificationHistory() {
-    return this.request<any[]>('/notifications/history');
+  async getNotificationHistory(params?: { limit?: number; cursor?: string }) {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set('limit', String(params.limit));
+    if (params?.cursor) search.set('cursor', params.cursor);
+    const qs = search.toString();
+    return this.request<{ items: any[]; nextCursor: string | null }>(
+      `/notifications/history${qs ? `?${qs}` : ''}`
+    );
   }
 
   async acknowledgeAlert(alertId: string) {
     return this.request<any>(`/notifications/acknowledge/${alertId}`, {
       method: 'PUT',
     });
+  }
+
+  /** Record a locally-fired expiry alert so server history stays complete. */
+  async recordExpiryAlert(alert: {
+    accountId: string;
+    alertType: string;
+    pointsAtRisk: number;
+  }) {
+    return this.request<{ success: boolean; id?: string | null; duplicate?: boolean }>(
+      '/notifications/alert',
+      {
+        method: 'POST',
+        body: JSON.stringify(alert),
+      }
+    );
   }
 }
 

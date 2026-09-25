@@ -1,6 +1,14 @@
 #!/bin/bash
 # Setup PointzPlus PostgreSQL Database
 
+MIGRATIONS_DIR="server/db/migrations"
+
+if [ ! -d "$MIGRATIONS_DIR" ]; then
+  echo "❌ Migrations directory '$MIGRATIONS_DIR' not found."
+  echo "   Place the .sql migrations there, then re-run this script."
+  exit 1
+fi
+
 echo "=== PointzPlus Database Setup ==="
 
 # Check if PostgreSQL is running
@@ -20,16 +28,16 @@ fi
 # Run migrations
 echo ""
 echo "Running migrations..."
-psql -d pointzplus -f supabase/migrations/20260915_001_init.sql
+psql -d pointzplus -f "$MIGRATIONS_DIR/20260915_001_init.sql"
 
 echo ""
 echo "Seeding programs..."
-psql -d pointzplus -f supabase/migrations/20260915_002_seed_programs.sql
+psql -d pointzplus -f "$MIGRATIONS_DIR/20260915_002_seed_programs.sql"
 
 echo ""
 echo "Adding coupons, tokens, sync jobs, security columns & slugs..."
-psql -d pointzplus -f supabase/migrations/20260915_003_coupons_and_sync_jobs.sql
-psql -d pointzplus -f supabase/migrations/20260915_004_security_and_slugs.sql
+psql -d pointzplus -f "$MIGRATIONS_DIR/20260915_003_coupons_and_sync_jobs.sql"
+psql -d pointzplus -f "$MIGRATIONS_DIR/20260915_004_security_and_slugs.sql"
 
 
 echo ""
@@ -38,7 +46,4 @@ echo ""
 echo "Next steps:"
 echo "1. cd server && npm install && npm start"
 echo "2. npx expo start (in pointzplus-mobile root)"
-echo ""
-echo "Default credentials (for development):"
-echo "Email: admin@pointzplus.com"
-echo "Password: pointzplus123"
+echo "3. Register a new account in the app; the database starts with no user portfolio data."

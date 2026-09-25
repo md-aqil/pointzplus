@@ -18,7 +18,7 @@ import { ScreenHeader } from "../../components/ui/ScreenHeader";
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState("davinder2038@gmail.com");
+  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 

@@ -1,5 +1,4 @@
 // services/smsDetector.ts – Android SMS Auto-Detect for Loyalty Points
-import { Platform } from 'react-native';
 import { POPULAR_PROGRAMS } from '../constants/popularPrograms';
 
 // SMS Regex patterns for popular loyalty programs
@@ -130,79 +129,20 @@ export function detectPointsFromSMS(smsBody: string, sender?: string): SMSDetect
   };
 }
 
-// Mock SMS retrieval (for testing)
-export async function getRecentSMS(limit: number = 10): Promise<{ body: string; sender: string; timestamp: string }[]> {
-  const mockSMS = [
-    {
-      body: 'AIRHELLO: You earned 2,400 SuperCoins on your HDFC transaction. Total balance: 1,289 points. Expires in 30 days.',
-      sender: 'AIRHELLO',
-      timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
-    },
-    {
-      body: 'CULTAPP: Great! You earned 450 FitCoins on your recent workout. Your current balance: 1,289 FitCoins. Points expire in 30 days.',
-      sender: 'CULTAPP',
-      timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
-    },
-    {
-      body: 'SWIGGY: You earned 200 SuperCoins on Swiggy One! Total: 2,400 SuperCoins. Use them for vouchers.',
-      sender: 'SWIGGY',
-      timestamp: new Date(Date.now() - 3600000 * 8).toISOString(),
-    },
-    {
-      body: 'HDFCBANK: Reward Points Statement for Card ending 4092. Current Balance: 9,150 Points. 500 pts expire on 30 Nov 2026.',
-      sender: 'HDFCBANK',
-      timestamp: new Date(Date.now() - 3600000 * 12).toISOString(),
-    },
-    {
-      body: 'FLIPKART: SuperCoins Alert: 500 SuperCoins added for your recent purchase. Balance: 8,450 SuperCoins.',
-      sender: 'FLIPKART',
-      timestamp: new Date(Date.now() - 3600000 * 18).toISOString(),
-    },
-  ];
-
-  return mockSMS.slice(0, limit);
-}
-
-// Main detection handler
-export async function detectLoyaltyFromSMS(): Promise<{
+// Parse messages supplied by a real device SMS provider or backend.
+// This function intentionally never creates or retrieves sample messages.
+export function detectLoyaltyFromSMS(
+  smsList: { body: string; sender?: string; timestamp?: string }[]
+): {
   detections: SMSDetectionResult[];
   totalSMSAnalyzed: number;
-}> {
-  const smsList = await getRecentSMS(20);
-  
-  const detections: SMSDetectionResult[] = [];
-  
-  for (const sms of smsList) {
-    const result = detectPointsFromSMS(sms.body, sms.sender);
-    
-    if (result) {
-      detections.push(result);
-    }
-  }
+} {
+  const detections = smsList
+    .map((sms) => detectPointsFromSMS(sms.body, sms.sender))
+    .filter((result): result is SMSDetectionResult => result !== null);
 
   return {
     detections,
     totalSMSAnalyzed: smsList.length,
   };
-}
-
-// Start SMS listener (for real-time detection)
-export function startSMSListener(callback: (detection: {
-  programId: string;
-  points: number;
-  confidence: number;
-}) => void) {
-  console.log('SMS listener started (placeholder)');
-  
-  // Simulate periodic checks
-  setInterval(async () => {
-    const result = await detectLoyaltyFromSMS();
-    if (result.detections.length > 0) {
-      callback({
-        programId: result.detections[0].programId,
-        points: result.detections[0].points,
-        confidence: result.detections[0].confidence,
-      });
-    }
-  }, 60000); // Check every minute
 }

@@ -1,4 +1,4 @@
--- supabase/migrations/20260915_004_security_and_slugs.sql
+-- server/db/migrations/20260915_004_security_and_slugs.sql
 -- P0/P1 remediation:
 --   1. Dedicated IV/tag columns for the encrypted Gmail refresh token. Previously
 --      only the access token's IV/tag were persisted, so refresh-token decrypts

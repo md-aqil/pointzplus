@@ -1,11 +1,18 @@
 // app/settings/notification-settings.tsx – Notification & Sync Settings matching Penpot Design
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, ScrollView, Switch } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Gift, TrendingUp, Clock, RefreshCw } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
+import {
+  getNotificationSettings,
+  updateNotificationSettings,
+} from "../../services/pushNotifications";
+import * as SecureStore from "expo-secure-store";
+
+const AUTO_SYNC_KEY = "pointzplus_auto_sync";
 
 export default function NotificationSettingsScreen() {
   const router = useRouter();
@@ -15,12 +22,44 @@ export default function NotificationSettingsScreen() {
   const [expiryNotif, setExpiryNotif] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
 
-  const toggleSwitch = (
-    setter: React.Dispatch<React.SetStateAction<boolean>>,
-    current: boolean
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      getNotificationSettings(),
+      SecureStore.getItemAsync(AUTO_SYNC_KEY),
+    ]).then(([settings, storedAutoSync]) => {
+      if (!active) return;
+      setExpiryNotif(settings.expiryAlertsEnabled);
+      setEarningNotif(settings.earningAlertsEnabled);
+      setDealsNotif(settings.offerAlertsEnabled);
+      if (storedAutoSync !== null) setAutoSync(storedAutoSync === "true");
+    }).catch(() => {
+      // Keep safe defaults when settings cannot be loaded.
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const toggleSetting = async (
+    key: "expiryAlertsEnabled" | "earningAlertsEnabled" | "offerAlertsEnabled",
+    value: boolean,
+    setValue: (value: boolean) => void,
+    currentValue: boolean
   ) => {
+    setValue(value);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setter(!current);
+    try {
+      await updateNotificationSettings({ [key]: value });
+    } catch {
+      setValue(currentValue);
+    }
+  };
+
+  const saveAutoSync = async (value: boolean) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setAutoSync(value);
+    await SecureStore.setItemAsync(AUTO_SYNC_KEY, String(value));
   };
 
   return (
@@ -68,7 +107,14 @@ export default function NotificationSettingsScreen() {
 
             <Switch
               value={expiryNotif}
-              onValueChange={() => toggleSwitch(setExpiryNotif, expiryNotif)}
+              onValueChange={(value) =>
+                void toggleSetting(
+                  "expiryAlertsEnabled",
+                  value,
+                  setExpiryNotif,
+                  expiryNotif
+                )
+              }
               trackColor={{ false: "#E6E6E8", true: "#02EFF4" }}
               thumbColor={expiryNotif ? "#070617" : "#FFFFFF"}
             />
@@ -98,7 +144,14 @@ export default function NotificationSettingsScreen() {
 
             <Switch
               value={earningNotif}
-              onValueChange={() => toggleSwitch(setEarningNotif, earningNotif)}
+              onValueChange={(value) =>
+                void toggleSetting(
+                  "earningAlertsEnabled",
+                  value,
+                  setEarningNotif,
+                  earningNotif
+                )
+              }
               trackColor={{ false: "#E6E6E8", true: "#02EFF4" }}
               thumbColor={earningNotif ? "#070617" : "#FFFFFF"}
             />
@@ -128,7 +181,14 @@ export default function NotificationSettingsScreen() {
 
             <Switch
               value={dealsNotif}
-              onValueChange={() => toggleSwitch(setDealsNotif, dealsNotif)}
+              onValueChange={(value) =>
+                void toggleSetting(
+                  "offerAlertsEnabled",
+                  value,
+                  setDealsNotif,
+                  dealsNotif
+                )
+              }
               trackColor={{ false: "#E6E6E8", true: "#02EFF4" }}
               thumbColor={dealsNotif ? "#070617" : "#FFFFFF"}
             />
@@ -166,7 +226,7 @@ export default function NotificationSettingsScreen() {
 
           <Switch
             value={autoSync}
-            onValueChange={() => toggleSwitch(setAutoSync, autoSync)}
+            onValueChange={(value) => void saveAutoSync(value)}
             trackColor={{ false: "#E6E6E8", true: "#02EFF4" }}
             thumbColor={autoSync ? "#070617" : "#FFFFFF"}
           />

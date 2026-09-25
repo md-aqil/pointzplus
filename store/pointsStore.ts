@@ -9,9 +9,10 @@ import {
   LoyaltyCategory,
   ExtractedCoupon,
 } from "../types/loyalty";
+import { NotificationItem } from "../types/models";
 import { POPULAR_PROGRAMS, CATEGORY_LABELS } from "../constants/popularPrograms";
-import { EmailSyncService } from "../services/emailParser";
 import { apiClient } from "../lib/apiClient";
+import { notifyPointsEarned, notifySpecialOffer } from "../services/pushNotifications";
 
 interface PointsState {
   // Data (Defaults to empty – no dummy data)
@@ -19,6 +20,7 @@ interface PointsState {
   emailAccounts: EmailSyncAccount[];
   transactions: PointsTransaction[];
   coupons: ExtractedCoupon[];
+  notifications: NotificationItem[];
   isSyncing: boolean;
   syncProgress: { step: string; percent: number };
 
@@ -52,8 +54,47 @@ interface PointsState {
   disconnectEmail: (provider: "gmail") => Promise<void>;
   fetchAccountsFromBackend: () => Promise<void>;
   fetchCouponsFromBackend: () => Promise<void>;
+  fetchNotificationsFromBackend: () => Promise<void>;
+  acknowledgeNotification: (id: string) => Promise<void>;
   markCouponUsed: (id: string, isUsed?: boolean) => Promise<void>;
   refreshAll: () => Promise<void>;
+}
+
+function notificationDateGroup(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Earlier";
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(date, today)) return "Today";
+  if (sameDay(date, yesterday)) return "Yesterday";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function notificationTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Recently";
+  return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function mapNotification(raw: any): NotificationItem {
+  const pointsAtRisk = Number(raw.points_at_risk ?? raw.pointsAtRisk ?? 0);
+  const programName = raw.program_name || raw.programName || "Loyalty Program";
+  const alertType = String(raw.alert_type || raw.alertType || "expiry");
+  const daysMatch = alertType.match(/(\d+)/);
+  const warningDays = daysMatch ? `${daysMatch[1]} days` : "soon";
+  return {
+    id: raw.id,
+    title: `${pointsAtRisk.toLocaleString()} points expiring soon`,
+    description: `${programName} points are due to expire in ${warningDays}. Use them before they are lost.`,
+    timestamp: notificationTimestamp(raw.triggered_at || raw.triggeredAt),
+    dateGroup: notificationDateGroup(raw.triggered_at || raw.triggeredAt || new Date().toISOString()),
+    isRead: Boolean(raw.acknowledged_by_user ?? raw.acknowledgedByUser),
+    type: "expiry",
+    pointsDelta: -pointsAtRisk,
+  };
 }
 
 function mapCoupon(raw: any): ExtractedCoupon {
@@ -85,6 +126,7 @@ export const usePointsStore = create<PointsState>((set, get) => ({
   emailAccounts: [],
   transactions: [],
   coupons: [],
+  notifications: [],
   isSyncing: false,
   syncProgress: { step: "Ready", percent: 0 },
 
@@ -222,10 +264,50 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     try {
       const rows = await apiClient.getCoupons();
       if (Array.isArray(rows)) {
-        set({ coupons: rows.map(mapCoupon) });
+        const previousIds = new Set(get().coupons.map((c) => c.id));
+        const next = rows.map(mapCoupon);
+        set({ coupons: next });
+
+        // Announce genuinely new offers, but never on the very first load.
+        if (previousIds.size > 0) {
+          const fresh = next.find((c) => !c.isUsed && !previousIds.has(c.id));
+          if (fresh) {
+            void notifySpecialOffer(
+              fresh.title || "New reward available",
+              fresh.description || "A new offer was added to your wallet.",
+              fresh.merchantName || "a partner"
+            );
+          }
+        }
       }
     } catch {
       // Keep the current cache on network errors
+    }
+  },
+
+  fetchNotificationsFromBackend: async () => {
+    try {
+      const response = await apiClient.getNotificationHistory({ limit: 50 });
+      set({
+        notifications: Array.isArray(response?.items)
+          ? response.items.map(mapNotification)
+          : [],
+      });
+    } catch {
+      // Keep the current cache on network errors
+    }
+  },
+
+  acknowledgeNotification: async (id: string) => {
+    try {
+      await apiClient.acknowledgeAlert(id);
+      set((state) => ({
+        notifications: state.notifications.map((notification) =>
+          notification.id === id ? { ...notification, isRead: true } : notification
+        ),
+      }));
+    } catch {
+      // Leave the item unread so the user can retry.
     }
   },
 
@@ -362,12 +444,15 @@ export const usePointsStore = create<PointsState>((set, get) => ({
         }
         handleProgress("Normalizing extracted balances & coupons...", 85);
       } catch (scanError) {
-        // Simulated local sync is a dev-only fallback; production must never fabricate data.
-        if (!__DEV__) throw scanError;
-        const local = await EmailSyncService.executeEmailSync(provider, email, handleProgress);
-        syncedAccounts = local.linkedAccounts;
-        syncedCoupons = local.extractedCoupons;
+        // No fabricated fallback: a sync must reflect real mailbox data, so an
+        // API failure surfaces to the user instead of inventing accounts.
+        handleProgress("Sync failed", 0);
+        throw scanError;
       }
+
+      const previousBalances = new Map(
+        get().accounts.map((a) => [a.programId, a.currentBalance])
+      );
 
       set((state) => {
         const existingProgramIds = new Set(syncedAccounts.map((a) => a.programId));
@@ -400,6 +485,16 @@ export const usePointsStore = create<PointsState>((set, get) => ({
         };
       });
 
+      // Surface balances that grew during this sync.
+      const increased = syncedAccounts.find((a) => {
+        const before = previousBalances.get(a.programId);
+        return before !== undefined && a.currentBalance > before;
+      });
+      if (increased) {
+        const before = previousBalances.get(increased.programId) ?? 0;
+        void notifyPointsEarned(increased.program.name, increased.currentBalance - before);
+      }
+
       return syncedAccounts;
     } catch (error) {
       set({ isSyncing: false, syncProgress: { step: "Error during sync", percent: 0 } });
@@ -419,7 +514,11 @@ export const usePointsStore = create<PointsState>((set, get) => ({
   refreshAll: async () => {
     set({ isSyncing: true });
     try {
-      await Promise.all([get().fetchAccountsFromBackend(), get().fetchCouponsFromBackend()]);
+      await Promise.all([
+        get().fetchAccountsFromBackend(),
+        get().fetchCouponsFromBackend(),
+        get().fetchNotificationsFromBackend(),
+      ]);
     } finally {
       set({ isSyncing: false });
     }

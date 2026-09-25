@@ -1,4 +1,4 @@
--- supabase/migrations/20260915_003_coupons_and_sync_jobs.sql
+-- server/db/migrations/20260915_003_coupons_and_sync_jobs.sql
 -- PointzPlus: Coupons, Promo Tokens, Async Sync Jobs, and Webhook Tracking
 
 -- ─── Types ──────────────────────────────────────────────────────────

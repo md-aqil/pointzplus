@@ -1,12 +1,18 @@
 # ✅ PointzPlus MVP Phase 1 - Complete Implementation Summary
 
+> **Historical document.** It describes the original MVP, which ran on an in-memory
+> Zustand store containing a hardcoded sample portfolio. **None of that sample data
+> exists any more.** The app now reads and writes only real rows from the local
+> PostgreSQL API, and shows empty states when you have no accounts. Treat every
+> figure below as an illustration, never as expected output.
+
 ## 🎯 What You Now Have
 
-A **fully functional, production-ready loyalty points aggregator** with:
+A **loyalty points aggregator** with:
 
 ### ✨ Core Features Implemented
 1. **Zustand Store (pointsStore.ts)** — Real-time state management
-   - ✅ Tracks 7 sample linked accounts (pre-seeded with realistic data)
+   - ✅ Holds the linked accounts fetched from the API (empty for a new user; the Phase-1 build pre-seeded 7 samples)
    - ✅ Email sync accounts (Gmail/Outlook connection status)
    - ✅ Computed selectors: getDashboardSummary(), getCategorySummaries(), getExpiringAccounts()
    - ✅ Actions: addManualAccount(), syncEmail(), deleteAccount(), updateAccount()
@@ -14,13 +20,12 @@ A **fully functional, production-ready loyalty points aggregator** with:
 2. **Email Sync Service (emailParser.ts)** — Statement parsing engine
    - ✅ Parser rules for 5 major programs (InterMiles, Air India, Marriott, HDFC, Flipkart)
    - ✅ Regex extractors for balance, account number, expiry dates
-   - ✅ Mock statement simulator with realistic e-receipt data
+   - ✅ Parser rules are reusable utilities; the bundled sample-statement simulator was **removed** — sync only ever returns API data
    - ✅ EmailSyncService.executeEmailSync() with live progress callbacks
 
 3. **Manual Program Tracker (add-account.tsx)** — User-friendly add flow
    - ✅ Category selector (12 loyalty categories)
    - ✅ Brand/program picker (20+ popular programs)
-   - ✅ Receipt/statement photo scanner simulation (OCR auto-fill demo)
    - ✅ Custom program support (if brand not in catalog)
    - ✅ Real-time validation with Zod schemas
 
@@ -30,7 +35,7 @@ A **fully functional, production-ready loyalty points aggregator** with:
    - ✅ Success modal showing programs found
    - ✅ Auto-import into pointsStore
 
-5. **Home Dashboard (home.tsx)** — Real data from pointsStore
+5. **Home Dashboard (home.tsx)** — Data from the API via pointsStore
    - ✅ Total points portfolio
    - ✅ Monthly earned tracker
    - ✅ Expiring soon alert badge
@@ -53,66 +58,55 @@ A **fully functional, production-ready loyalty points aggregator** with:
 
 ---
 
-## 🚀 Live Data Flow
+## 🚀 Data Flow
+
+> Every value below is a **placeholder for illustration only**. Nothing in the app ships
+> with these numbers — all figures come from PostgreSQL for the signed-in user. With no
+> accounts the screens show empty states, which is the correct behaviour.
 
 ```
 START: User opens app or refreshes
 
 HOME SCREEN:
 ├─ usePoints() hook fetches from pointsStore
-├─ Displays 7 REAL linked accounts:
-│  ├─ InterMiles: 11,450 pts (expiring 2,500 on 18 Aug)
-│  ├─ Air India: 4,318 pts (expiring 588 on 30 Sep)
-│  ├─ Marriott Bonvoy: 3,500 pts (expiring 1,000 on 15 Oct)
-│  ├─ Hilton Honors: 2,280 pts (no expiry)
-│  ├─ HDFC Regalia: 9,150 pts
-│  ├─ Flipkart SuperCoins: 8,450 pts (expiring 500)
-│  └─ Cult.fit Health: 1,289 pts (expiring 412)
+├─ Displays the accounts from GET /api/accounts (example shape only):
+│  ├─ <program>: <balance> pts (expiring <n> on <date>)
+│  └─ …one row per row in your linked_accounts table
 │
 ├─ Dashboard Summary (from getDashboardSummary()):
-│  ├─ totalPoints: 40,437
-│  ├─ portfolioValueINR: ₹15,287 (calculated from point values)
-│  ├─ expiringThisMonth: 5,000
-│  └─ linkedAccountsCount: 7
+│  ├─ totalPoints:            Σ current_balance
+│  ├─ portfolioValueINR:      Σ (current_balance × point_value_inr)
+│  ├─ expiringThisMonth:      Σ expiring_points within the window
+│  └─ linkedAccountsCount:    COUNT of your linked_accounts
 │
 ├─ Categories (from getCategorySummaries()):
-│  ├─ Airlines: 15,768 pts (4 brands)
-│  ├─ Hotels: 5,780 pts (2 brands)
-│  ├─ Banking: 9,150 pts (1 brand)
-│  ├─ Retail: 8,450 pts (1 brand)
-│  └─ Health: 1,289 pts (1 brand)
+│  └─ <category>: <points> pts (<n> brands) — only categories you actually hold
 │
 └─ Expiring Alerts:
-   ├─ InterMiles: 2,500 pts expire 18 Aug
-   ├─ Air India: 588 pts expire 30 Sep
-   ├─ Marriott: 1,000 pts expire 15 Oct
-   ├─ Flipkart: 500 pts expire 31 Dec
-   └─ Cult.fit: 412 pts expire 30 Nov
+   └─ <program>: <points> pts expire <date> — from real expiring_points / expiry_date
 
 OVERVIEW SCREEN:
-├─ Portfolio Value: ₹15,287
+├─ Portfolio Value: Σ (current_balance × point_value_inr)
 ├─ Category breakdown with % bars
 ├─ Expiring section (red alerts)
-└─ Statistics (earned: 697, categories: 5)
+└─ Statistics (earned/redeemed from points_transactions, category count)
 
 PROFILE SCREEN:
 ├─ Loyalty Portfolio Widget
-│  ├─ Total Points: 40,437
-│  ├─ Est. Value: ₹15,287
-│  └─ Active: 7 programs
-├─ Email Sync Status: Connected via Gmail
+│  ├─ Total Points / Est. Value / Active count — from your own rows
+├─ Email Sync Status: "Connected" only when a real email_sync_accounts row exists
 └─ Quick buttons: Add Program, View Breakdown
 
 EMAIL SYNC FLOW (user action):
 ├─ User taps "Email Sync"
 ├─ Selects "Gmail" or "Outlook"
-├─ EmailSyncService.executeEmailSync() triggers:
-│  ├─ Step 1 (20%): Connect to OAuth (simulated)
-│  ├─ Step 2 (45%): Search inbox for loyalty emails
-│  ├─ Step 3 (75%): Parse statements with regex
+├─ apiClient.scanEmails() triggers POST /api/email-sync/scan:
+│  ├─ Step 1 (20%): Google OAuth is configured server-side
+│  ├─ Step 2 (45%): Server searches the user's real inbox
+│  ├─ Step 3 (75%): Parses statements with regex
 │  │  └─ Extracts: account #, balance, expiry date
 │  ├─ Step 4 (90%): Normalize to LinkedAccount objects
-│  └─ Step 5 (100%): Save to pointsStore
+│  └─ Step 5 (100%): Persist rows in PostgreSQL
 │
 ├─ pointsStore.set() updates accounts array
 ├─ usePoints() hook re-fetches data
@@ -210,17 +204,20 @@ pointzplus-mobile/
 
 ## 🎮 How to Test Each Feature
 
-### Test 1: Home Dashboard Shows Real Data
+### Test 1: Home Dashboard Shows Your Data
+> The figures below are placeholders. Expect whatever is in **your** database — `0` on a
+> new account.
 ```
 1. npm run android (or press 'a' in expo start)
 2. App opens → Home tab
-3. Verify:
-   ✅ Total Points: 40,437
-   ✅ Monthly Earned: +697
-   ✅ Expiring Soon: 5,000 badge
-   ✅ 5 category pills (Airlines, Hotels, Banking, Retail, Health)
-   ✅ 7 program cards listed below
-   ✅ Expiry warnings on each card
+3. Verify (with at least one linked account):
+   ✅ Total Points: the sum of YOUR linked-account balances
+   ✅ Monthly Earned: the sum of YOUR credits this month
+   ✅ Expiring Soon: YOUR expiring balances, with a badge when non-zero
+   ✅ One category pill per category YOU hold points in
+   ✅ One card per row in your linked_accounts table
+   ✅ Expiry warnings on each card that has an expiry date
+4. With no accounts, the screen shows the empty state and 0 pts — also correct.
 ```
 
 ### Test 2: Email Sync Flow
@@ -229,14 +226,15 @@ pointzplus-mobile/
 2. Opens /email-sync screen
 3. Tap "Connect with Google Gmail"
 4. Watch progress:
-   ✅ "20%: Connecting to Google Gmail OAuth..."
-   ✅ "45%: Searching inbox for loyalty statements..."
-   ✅ "75%: Extracting reward balances..."
-   ✅ "90%: Normalizing points data..."
-   ✅ "100%: Sync complete! Successfully extracted 5 programs."
-5. Success modal: "Email Sync Complete! Discovered Programs: 5 Active"
+   ✅ "Connecting to Google Gmail OAuth..."
+   ✅ "Searching inbox for loyalty statements..."
+   ✅ "Extracting reward balances..."
+   ✅ "Normalizing points data..."
+   ✅ "Sync complete!"
+5. Success modal lists the programs actually discovered
 6. Tap "View Updated Dashboard" → back to Home
-7. Verify: accounts are still there (mock data persisted)
+7. Verify: the accounts are still there **and survive an app restart** (they are rows in
+   PostgreSQL, not in-memory state)
 ```
 
 ### Test 3: Manual Add Program
@@ -261,17 +259,14 @@ pointzplus-mobile/
 1. Home → tap the dark Points Card (top banner)
 2. Opens /overview screen
 3. Verify:
-   ✅ Portfolio Value: ₹15,287 (or updated if you added programs)
+   ✅ Portfolio Value: your total (or updated if you added programs)
    ✅ Statistics:
-      • Earned This Month: +697
-      • Expiring Soon: 5,000
-      • Categories: 5
-   ✅ Category breakdown list:
-      • Airlines: 15,768 pts (40%)
-      • Hotels: 5,780 pts (15%)
-      • Banking: 9,150 pts (23%)
-      • Retail: 8,450 pts (21%)
-      • Health: 1,289 pts (3%)
+      • Earned This Month: your credits this month
+      • Expiring Soon: your expiring balances
+      • Categories: the categories you hold points in
+   ✅ Category breakdown list, one row per category YOU have:
+      • Airlines / Hotels / Banking / Retail / Health …
+      • each with your balance and its share of the total
    ✅ Progress bars visualize percentages
    ✅ Expiring Soon section (red alerts) shows all expiry accounts
 ```
@@ -281,9 +276,9 @@ pointzplus-mobile/
 1. Tap Profile tab
 2. Scroll to "Loyalty Portfolio" card
 3. Verify:
-   ✅ Total Points: 40,437
-   ✅ Est. Value: ₹15,287
-   ✅ Active: 7 programs
+   ✅ Total Points: your total
+   ✅ Est. Value: your total × each program's point value
+   ✅ Active: your linked-account count
    ✅ "Email Auto-Sync" shows status (Connected via Gmail / Not connected)
    ✅ "Add Program" & "View Breakdown" buttons work
 ```
@@ -294,7 +289,8 @@ pointzplus-mobile/
 2. Verify:
    ✅ All data reloads correctly
    ✅ Programs still visible
-   ✅ Totals unchanged (mock data is in-memory, resets on app restart)
+   ✅ Totals unchanged — and unlike the old build they **persist across an app
+      restart**, because they live in PostgreSQL
 ```
 
 ---
@@ -342,8 +338,8 @@ eas publish
 ## 📝 Next: Phase 2 (Recommended Enhancements)
 
 1. **Real Backend Integration**
-   - Replace in-memory Zustand with Supabase PostgreSQL
-   - Real Gmail/Outlook OAuth (not mock)
+   - Replace in-memory Zustand with the local PostgreSQL API
+   - Real Gmail/Outlook OAuth (not a sample-statement simulator)
    - Persistent storage
 
 2. **Android SMS Reader**

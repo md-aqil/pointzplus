@@ -5,13 +5,34 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { apiClient } from '../lib/apiClient';
 
-// Local dedup ledger so we don't re-notify for the same account+tier on every app open
+// Local dedup ledger so we don't re-notify for the same account+tier on every app open.
+// SecureStore values are size-capped (notably ~2KB on Android), so the ledger is
+// pruned by age and entry count to keep writes small.
 const SENT_ALERTS_KEY = 'pointzplus_sent_expiry_alerts';
+const LEDGER_MAX_AGE_MS = 120 * 24 * 60 * 60 * 1000; // 120 days
+const LEDGER_MAX_ENTRIES = 20;
+const LEDGER_MAX_BYTES = 1800;
+
+function pruneSentAlerts(entries: Record<string, string>): Record<string, string> {
+  const cutoff = Date.now() - LEDGER_MAX_AGE_MS;
+  return Object.fromEntries(
+    Object.entries(entries)
+      .filter(([, timestamp]) => {
+        const t = new Date(timestamp).getTime();
+        return Number.isFinite(t) && t >= cutoff;
+      })
+      .sort((a, b) => new Date(b[1]).getTime() - new Date(a[1]).getTime())
+      .slice(0, LEDGER_MAX_ENTRIES)
+  );
+}
 
 async function getSentAlerts(): Promise<Record<string, string>> {
   try {
     const raw = await SecureStore.getItemAsync(SENT_ALERTS_KEY);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return pruneSentAlerts(parsed as Record<string, string>);
   } catch {
     return {};
   }
@@ -21,7 +42,10 @@ async function markAlertSent(key: string): Promise<void> {
   try {
     const current = await getSentAlerts();
     current[key] = new Date().toISOString();
-    await SecureStore.setItemAsync(SENT_ALERTS_KEY, JSON.stringify(current));
+    const payload = JSON.stringify(pruneSentAlerts(current));
+    // Skip oversized writes rather than letting SecureStore reject them silently.
+    if (payload.length > LEDGER_MAX_BYTES) return;
+    await SecureStore.setItemAsync(SENT_ALERTS_KEY, payload);
   } catch {
     // Non-fatal
   }
@@ -38,7 +62,7 @@ ExpoNotifications.setNotificationHandler({
   }),
 });
 
-interface PushNotificationSettings {
+export interface PushNotificationSettings {
   expiryAlertsEnabled: boolean;
   expiryWarningDays: number[];
   earningAlertsEnabled: boolean;
@@ -54,8 +78,7 @@ const DEFAULT_SETTINGS: PushNotificationSettings = {
 
 // Request permissions and get push token
 export async function registerForPushNotifications(): Promise<string | null> {
-  if (!Device.isDevice) {
-    console.log('Push notifications require a physical device');
+  if (Platform.OS === 'web') {
     return null;
   }
 
@@ -91,8 +114,12 @@ export async function registerForPushNotifications(): Promise<string | null> {
     });
   }
 
+  if (!Device.isDevice) {
+    // Local notifications work in simulators; only remote Expo tokens do not.
+    return null;
+  }
+
   const pushToken = await ExpoNotifications.getExpoPushTokenAsync();
-  console.log('Push token obtained:', pushToken.data);
 
   // Save push token via the local API
   await savePushToken(pushToken.data);
@@ -108,6 +135,28 @@ async function savePushToken(token: string) {
   }
 }
 
+async function ensureNotificationChannel(channelId: string) {
+  if (Platform.OS !== 'android') return;
+  if (channelId === 'earning-alerts') {
+    await ExpoNotifications.setNotificationChannelAsync(channelId, {
+      name: 'Earning Alerts',
+      importance: ExpoNotifications.AndroidImportance.DEFAULT,
+    });
+  } else if (channelId === 'offers') {
+    await ExpoNotifications.setNotificationChannelAsync(channelId, {
+      name: 'Special Offers',
+      importance: ExpoNotifications.AndroidImportance.DEFAULT,
+    });
+  } else if (channelId === 'expiry-alerts') {
+    await ExpoNotifications.setNotificationChannelAsync(channelId, {
+      name: 'Expiry Alerts',
+      importance: ExpoNotifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#02EFF4',
+    });
+  }
+}
+
 // Send local notification (immediate)
 export async function sendLocalNotification(
   title: string,
@@ -115,6 +164,7 @@ export async function sendLocalNotification(
   data?: Record<string, any>,
   channelId: string = 'default'
 ) {
+  await ensureNotificationChannel(channelId);
   await ExpoNotifications.scheduleNotificationAsync({
     content: {
       title,
@@ -122,7 +172,8 @@ export async function sendLocalNotification(
       data,
       sound: 'default',
     },
-    trigger: null, // null = immediate
+    // null schedules immediately; Android channel selection is configured above.
+    trigger: null,
   });
 }
 
@@ -144,44 +195,68 @@ export async function scheduleExpiryAlert(
   );
 }
 
-// Send earning notification
+// Send earning notification (respects the user's earning-alert setting)
 export async function notifyPointsEarned(
   programName: string,
   pointsEarned: number
 ) {
-  const title = `🎉 +${pointsEarned} Points Earned!`;
-  const body = `Great news! You just earned ${pointsEarned} points with ${programName}.`;
+  try {
+    if (pointsEarned <= 0) return;
+    const settings = await getNotificationSettings();
+    if (!settings.earningAlertsEnabled) return;
 
-  await sendLocalNotification(
-    title,
-    body,
-    { type: 'earning_alert', programName, pointsEarned },
-    'earning-alerts'
-  );
+    const { status } = await ExpoNotifications.getPermissionsAsync();
+    if (status !== 'granted') return;
+
+    const title = `🎉 +${pointsEarned} Points Earned!`;
+    const body = `Great news! You just earned ${pointsEarned} points with ${programName}.`;
+
+    await sendLocalNotification(
+      title,
+      body,
+      { type: 'earning_alert', programName, pointsEarned },
+      'earning-alerts'
+    );
+  } catch (error) {
+    console.error('Error sending earning notification:', error);
+  }
 }
 
-// Notify about new offer
+// Notify about new offer (respects the user's offer-alert setting)
 export async function notifySpecialOffer(
   offerTitle: string,
   offerDescription: string,
   partnerName: string
 ) {
-  const title = `🎁 ${offerTitle}`;
-  const body = `${offerDescription} - Valid at ${partnerName}`;
+  try {
+    const settings = await getNotificationSettings();
+    if (!settings.offerAlertsEnabled) return;
 
-  await sendLocalNotification(
-    title,
-    body,
-    { type: 'offer', partnerName, offerTitle },
-    'offers'
-  );
+    const { status } = await ExpoNotifications.getPermissionsAsync();
+    if (status !== 'granted') return;
+
+    const title = `🎁 ${offerTitle}`;
+    const body = `${offerDescription} - Valid at ${partnerName}`;
+
+    await sendLocalNotification(
+      title,
+      body,
+      { type: 'offer', partnerName, offerTitle },
+      'offers'
+    );
+  } catch (error) {
+    console.error('Error sending offer notification:', error);
+  }
 }
 
-// Check and trigger expiry alerts (run on app open/background sync)
+// Check and trigger expiry alerts (runs on app open after auth)
 export async function checkAndTriggerExpiryAlerts() {
   try {
-    // Accounts with points expiring within 90 days (from local PostgreSQL API)
-    const expiringAccounts = await apiClient.getExpiryAlerts();
+    const settings = await getNotificationSettings();
+    if (!settings.expiryAlertsEnabled || settings.expiryWarningDays.length === 0) return;
+
+    const warningWindow = Math.max(...settings.expiryWarningDays);
+    const expiringAccounts = await apiClient.getExpiryAlerts(warningWindow);
     if (!Array.isArray(expiringAccounts) || expiringAccounts.length === 0) return;
 
     const sentAlerts = await getSentAlerts();
@@ -191,9 +266,9 @@ export async function checkAndTriggerExpiryAlerts() {
         (new Date(account.expiry_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
       );
 
-      // Bucketed thresholds: smallest of 15/30/45/90 that is >= daysUntil,
-      // so alerts fire on any day (exact-match checks almost never fired).
-      const alertDays = [15, 30, 45, 90];
+      // Bucketed thresholds: smallest configured threshold that covers the
+      // expiry, so alerts fire on any day (exact-match checks almost never fired).
+      const alertDays = [...settings.expiryWarningDays].sort((a, b) => a - b);
       const tier = alertDays.find((t) => daysUntilExpiry <= t);
       if (!tier) continue;
 
@@ -206,9 +281,20 @@ export async function checkAndTriggerExpiryAlerts() {
         account.expiry_date,
         daysUntilExpiry
       );
+
+      // Mirror the alert server-side so /notifications/history reflects it even
+      // when the cron (/api/notifications/check-expiry) has not run yet.
+      try {
+        await apiClient.recordExpiryAlert({
+          accountId: account.id,
+          alertType: `${tier}days`,
+          pointsAtRisk: account.expiring_points,
+        });
+      } catch {
+        // Best-effort mirror; the local banner already fired.
+      }
+
       await markAlertSent(dedupKey);
-      // The server-side cron (/api/notifications/check-expiry) records the
-      // expiry_alerts row; the client only schedules the local notification.
     }
   } catch (error) {
     console.error('Error checking expiry alerts:', error);
@@ -219,7 +305,20 @@ export async function checkAndTriggerExpiryAlerts() {
 export function setupNotificationResponseHandler(
   onNotificationTap: (data: Record<string, any>) => void
 ) {
-  ExpoNotifications.addNotificationResponseReceivedListener(response => {
+  // Cold start: the app may have been launched by a notification tap, in which
+  // case the listener below would never fire for it.
+  try {
+    const last = ExpoNotifications.getLastNotificationResponse();
+    const coldStartData = last?.notification.request.content.data;
+    if (coldStartData) {
+      onNotificationTap(coldStartData);
+      ExpoNotifications.clearLastNotificationResponse();
+    }
+  } catch {
+    // Non-fatal: cold-start replay is best-effort.
+  }
+
+  return ExpoNotifications.addNotificationResponseReceivedListener(response => {
     const data = response.notification.request.content.data;
     if (data) {
       onNotificationTap(data);
@@ -235,7 +334,7 @@ export async function getNotificationSettings(): Promise<PushNotificationSetting
 
     return {
       expiryAlertsEnabled: data.expiry_alerts_enabled ?? true,
-      expiryWarningDays: data.expiry_warning_days ?? [15, 30, 45, 90],
+      expiryWarningDays: (data.expiry_warning_days ?? [15, 30, 45, 90]).map(Number),
       earningAlertsEnabled: data.earning_alerts_enabled ?? true,
       offerAlertsEnabled: data.offer_alerts_enabled ?? true,
     };
@@ -246,9 +345,5 @@ export async function getNotificationSettings(): Promise<PushNotificationSetting
 
 // Update notification settings
 export async function updateNotificationSettings(settings: Partial<PushNotificationSettings>) {
-  try {
-    await apiClient.updateNotificationSettings(settings);
-  } catch (error) {
-    console.error('Error updating notification settings:', error);
-  }
+  await apiClient.updateNotificationSettings(settings);
 }

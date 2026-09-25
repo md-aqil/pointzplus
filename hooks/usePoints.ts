@@ -1,7 +1,5 @@
 import { usePointsStore } from "../store/pointsStore";
 import { useAuthStore } from "../store/authStore";
-import { NotificationItem } from "../types/models";
-
 export function usePoints() {
   const user = useAuthStore((state) => state.user);
   const accounts = usePointsStore((state) => state.accounts);
@@ -20,6 +18,9 @@ export function usePoints() {
   const markCouponUsed = usePointsStore((state) => state.markCouponUsed);
   const refreshAll = usePointsStore((state) => state.refreshAll);
 
+  const notifications = usePointsStore((state) => state.notifications);
+  const fetchNotificationsFromBackend = usePointsStore((state) => state.fetchNotificationsFromBackend);
+  const acknowledgeNotification = usePointsStore((state) => state.acknowledgeNotification);
   const summary = getDashboardSummary();
   const categorySummaries = getCategorySummaries();
   const expiringAccounts = getExpiringAccounts();
@@ -40,7 +41,9 @@ export function usePoints() {
     coupons,
     activeCoupons,
     expiringCoupons,
-    notifications: [] as NotificationItem[],
+    notifications,
+    fetchNotificationsFromBackend,
+    acknowledgeNotification,
     categories: categorySummaries,
     expiringAccounts,
 

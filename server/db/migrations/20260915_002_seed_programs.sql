@@ -1,4 +1,4 @@
--- supabase/migrations/20260915_002_seed_programs.sql
+-- server/db/migrations/20260915_002_seed_programs.sql
 -- Seed popular loyalty programs catalog
 
 INSERT INTO public.loyalty_programs (

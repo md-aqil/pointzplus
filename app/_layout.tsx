@@ -1,7 +1,7 @@
 // app/_layout.tsx – Root layout with custom fonts, safe areas & providers
 import "../global.css";
-import React, { useEffect } from "react";
-import { Stack } from "expo-router";
+import React, { useEffect, useRef } from "react";
+import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -16,6 +16,11 @@ import {
 } from "@expo-google-fonts/plus-jakarta-sans";
 import { apiClient } from "../lib/apiClient";
 import { useAuthStore } from "../store/authStore";
+import {
+  checkAndTriggerExpiryAlerts,
+  registerForPushNotifications,
+  setupNotificationResponseHandler,
+} from "../services/pushNotifications";
 
 // Keep splash screen visible while loading fonts
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -71,10 +76,43 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
+  const router = useRouter();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const pushInitialized = useRef(false);
+
   // Re-validate persisted session on every cold start
   useEffect(() => {
     restoreSession();
   }, []);
+
+  // Register device push only after authentication is confirmed. Physical
+  // devices are required for Expo push tokens; local notifications remain
+  // available in simulators and Expo Go.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      pushInitialized.current = false;
+      return;
+    }
+    if (pushInitialized.current) return;
+    pushInitialized.current = true;
+    registerForPushNotifications()
+      .then(() => checkAndTriggerExpiryAlerts())
+      .catch(() => {
+        // Push permission and device services are best-effort; the app still works.
+        pushInitialized.current = false;
+      });
+  }, [isAuthenticated]);
+
+  // Notification taps (including a cold start launched by a tap) open the
+  // alerts screen, once the user is actually signed in.
+  useEffect(() => {
+    const subscription = setupNotificationResponseHandler((data) => {
+      if (!data?.type) return;
+      if (!useAuthStore.getState().isAuthenticated) return;
+      router.push("/notifications");
+    });
+    return () => subscription.remove();
+  }, [router]);
 
   if (!fontsLoaded && !fontError) {
     return null;
