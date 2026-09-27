@@ -30,7 +30,6 @@ export interface SyncJob {
   status: SyncJobStatus;
   total_messages_found: number | null;
   messages_processed: number | null;
-  coupons_extracted: number | null;
   programs_updated: number | null;
   error_details: string | null;
   created_at?: string;
@@ -58,4 +57,27 @@ export interface BackendLinkedAccount {
   logo_initial?: string | null;
   accent_color?: string | null;
   point_value_inr?: number | string | null;
+}
+
+/**
+ * Wire shape returned by GET /api/analytics/portfolio.
+ * The server aggregates these in SQL, so the client never has to derive
+ * monthly credit/debit flows from a partial transaction list.
+ */
+export interface BackendPortfolioSummary {
+  total_accounts: number;
+  total_points: number;
+  portfolio_value_inr: number | string;
+  expiring_points: number;
+  last_sync: string | null;
+  monthly_earned: number;
+  monthly_redeemed: number;
+}
+
+/** One row of the per-category rollup returned alongside the portfolio summary. */
+export interface BackendCategoryBreakdown {
+  category: string;
+  brand_count: number;
+  total_points: number;
+  expiring_points: number;
 }

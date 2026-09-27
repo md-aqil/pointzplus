@@ -29,7 +29,11 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const { summary, categories, expiringAccounts, refreshAll, isSyncing } = usePoints();
   const [refreshing, setRefreshing] = useState(false);
-  const [showTooltip, setShowTooltip] = useState(true);
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  React.useEffect(() => {
+    refreshAll();
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);

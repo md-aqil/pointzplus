@@ -1,21 +1,57 @@
-// lib/apiClient.ts – Local PostgreSQL API Client
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import type { BackendLinkedAccount, SyncJob } from '../types/models';
+import Constants from 'expo-constants';
+import type {
+  BackendLinkedAccount,
+  BackendPortfolioSummary,
+  BackendCategoryBreakdown,
+  SyncJob,
+} from '../types/models';
 
-// Inside an Android emulator, `localhost` refers to the emulator itself, so
-// requests to the dev machine fail with a connection error. The emulator
-// reaches the host loopback through 10.0.2.2 instead. iOS simulators and web
-// can use the host loopback directly.
-//
-// A physical Android device needs your computer's LAN IP, so set
-// EXPO_PUBLIC_API_URL explicitly in .env for that case.
-const DEFAULT_API_HOST = Platform.select({
-  android: '10.0.2.2', // Android emulator -> host machine
-  default: 'localhost', // iOS simulator + web
-});
+/**
+ * Dynamically resolves the API base URL for zero-config networking across
+ * all platforms: Web, iOS Simulator, Android Emulator, and Physical Devices.
+ */
+function resolveApiBase(): string {
+  // 1. Explicit override in .env takes highest priority if set
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
 
-const API_BASE = process.env.EXPO_PUBLIC_API_URL || `http://${DEFAULT_API_HOST}:3001/api`;
+  // 2. Web browser: use the current browser hostname
+  if (Platform.OS === 'web') {
+    const host =
+      typeof window !== 'undefined' && window.location?.hostname
+        ? window.location.hostname
+        : 'localhost';
+    return `http://${host}:3001/api`;
+  }
+
+  // 3. Physical mobile device running via Expo:
+  // Constants.expoConfig?.hostUri or debuggerHost holds the computer's current LAN IP (e.g. 172.20.10.3:8081)
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants.manifest2 as any)?.extra?.expoGo?.debuggerHost ||
+    (Constants as any).manifest?.debuggerHost;
+
+  if (hostUri) {
+    const ip = hostUri.split(':')[0];
+    if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+      return `http://${ip}:3001/api`;
+    }
+  }
+
+  // 4. Emulators & Simulators fallback:
+  // Android emulator uses 10.0.2.2 to access host; iOS simulator uses localhost
+  const defaultHost = Platform.select({
+    android: '10.0.2.2',
+    default: 'localhost',
+  });
+
+  return `http://${defaultHost}:3001/api`;
+}
+
+const API_BASE = resolveApiBase();
 
 const TOKEN_STORAGE_KEY = 'pointzplus_auth_token';
 
@@ -24,19 +60,35 @@ class ApiClient {
 
   setToken(token: string) {
     this.token = token;
-    // Persist so sessions survive app restarts (in-memory tokens are lost on kill)
-    SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token).catch(() => {});
+    if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      } catch {}
+    } else {
+      SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token).catch(() => {});
+    }
   }
 
   clearToken() {
     this.token = null;
-    SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
+    if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+      } catch {}
+    } else {
+      SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
+    }
   }
 
-  /** Load the persisted token into memory (call once on app startup). */
+  /** Load the persisted token into memory (call once on app startup or before authenticated requests). */
   async restoreToken(): Promise<string | null> {
     if (this.token) return this.token;
     try {
+      if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
+        if (stored) this.token = stored;
+        return this.token;
+      }
       const stored = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
       if (stored) this.token = stored;
       return this.token;
@@ -53,6 +105,10 @@ class ApiClient {
       'Content-Type': 'application/json',
       ...options.headers,
     };
+
+    if (!this.token) {
+      await this.restoreToken();
+    }
 
     if (this.token) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${this.token}`;
@@ -210,43 +266,16 @@ class ApiClient {
     return this.request<any>('/email-sync/google/watch', { method: 'POST' });
   }
 
-  // ─── Coupons ─────────────────────────────────────────
-  async getCoupons(params?: { used?: boolean; category?: string; active?: boolean }) {
-    const search = new URLSearchParams();
-    if (params?.used !== undefined) search.set('used', String(params.used));
-    if (params?.category) search.set('category', params.category);
-    if (params?.active) search.set('active', 'true');
-    const qs = search.toString();
-    return this.request<any[]>(`/coupons${qs ? `?${qs}` : ''}`);
-  }
-
-  async getExpiringCoupons() {
-    return this.request<any[]>('/coupons/expiring');
-  }
-
-  async getCouponSummary() {
-    return this.request<{ active: number; used: number; expiringSoon: number }>('/coupons/summary');
-  }
-
-  async markCouponUsed(id: string, isUsed = true) {
-    return this.request<any>(`/coupons/${id}/use`, {
-      method: 'PUT',
-      body: JSON.stringify({ isUsed }),
-    });
-  }
-
-  async deleteCoupon(id: string) {
-    return this.request<any>(`/coupons/${id}`, { method: 'DELETE' });
-  }
-
   async getEmailAccounts() {
     return this.request<any[]>('/email-sync/accounts');
   }
 
-  async disconnectEmail(provider: string) {
-    return this.request<any>(`/email-sync/accounts/${provider}`, {
-      method: 'DELETE',
-    });
+  /** Disconnect one mailbox. Pass the email_sync_accounts row id, not the provider. */
+  async disconnectEmail(accountId: string) {
+    return this.request<{ message: string; email?: string }>(
+      `/email-sync/accounts/${encodeURIComponent(accountId)}`,
+      { method: 'DELETE' }
+    );
   }
 
   // ─── SMS Detection ───────────────────────────────────
@@ -280,8 +309,16 @@ class ApiClient {
   }
 
   // ─── Analytics ──────────────────────────────────────
+  /**
+   * Server-side portfolio rollup. Includes the current-month credit/debit
+   * totals, which cannot be derived client-side because the transactions
+   * endpoint is per-account and paginated.
+   */
   async getPortfolioSummary() {
-    return this.request<any>('/analytics/portfolio');
+    return this.request<{
+      summary: BackendPortfolioSummary;
+      categories: BackendCategoryBreakdown[];
+    }>('/analytics/portfolio');
   }
 
   async getExpiringAlerts() {

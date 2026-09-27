@@ -1,14 +1,67 @@
 // server/repositories/emailSync.repo.js – email_sync_accounts, sync_jobs,
-// statement/coupon persistence for the Gmail pipeline.
+// statement persistence for the Gmail pipeline.
 import { query } from '../db.js';
+import { STATEMENT_RULES } from '../services/statementParser.js';
+
+// Sibling/alias sender domains → the parser rule that owns them. The catalogue
+// only stores one primary `seller_domain` per program, but statements routinely
+
+/** Value used for dynamically registered programs; see the INSERT below. */
+const DEFAULT_POINT_VALUE_INR = 0.25;
+
+// arrive from another brand in the same group (Flipkart SuperCoins → myntra.com).
+const DOMAIN_TO_RULE_PROGRAM = new Map();
+for (const rule of STATEMENT_RULES) {
+  for (const d of rule.domains || []) {
+    if (!DOMAIN_TO_RULE_PROGRAM.has(d)) {
+      DOMAIN_TO_RULE_PROGRAM.set(d, rule.programId);
+    }
+  }
+}
+
+const domainRuleProgramId = (domain) =>
+  (domain ? DOMAIN_TO_RULE_PROGRAM.get(String(domain).toLowerCase()) : undefined) || null;
+
+/**
+ * True when the sender domain is one we already recognise — either a catalogue
+ * `seller_domain` or a known parser alias. Only these may fall through to a fuzzy
+ * name match; an unknown sender must never borrow an existing programme.
+ */
+async function isTrustedSenderDomain(domain) {
+  if (DOMAIN_TO_RULE_PROGRAM.has(String(domain).toLowerCase())) return true;
+  const row = await query(
+    'SELECT 1 FROM loyalty_programs WHERE seller_domain = $1 LIMIT 1',
+    [domain]
+  ).then((r) => r.rows[0] || null);
+  return Boolean(row);
+}
 
 export const EmailSyncRepo = {
   // ── email_sync_accounts ────────────────────────────────────────
+  /** First connected account for a provider (used when no specific one is given). */
   findConnected(userId, provider) {
     return query(
       `SELECT * FROM email_sync_accounts
-       WHERE user_id = $1 AND provider = $2 AND status = 'connected'`,
+       WHERE user_id = $1 AND provider = $2 AND status = 'connected'
+       ORDER BY created_at ASC LIMIT 1`,
       [userId, provider]
+    ).then((r) => r.rows[0] || null);
+  },
+
+  /** Every connected mailbox for a provider, oldest first. */
+  findAllConnected(userId, provider) {
+    return query(
+      `SELECT * FROM email_sync_accounts
+       WHERE user_id = $1 AND provider = $2 AND status = 'connected'
+       ORDER BY created_at ASC`,
+      [userId, provider]
+    ).then((r) => r.rows);
+  },
+
+  findById(userId, id) {
+    return query(
+      `SELECT * FROM email_sync_accounts WHERE id = $1 AND user_id = $2`,
+      [id, userId]
     ).then((r) => r.rows[0] || null);
   },
 
@@ -21,10 +74,22 @@ export const EmailSyncRepo = {
     ).then((r) => r.rows[0] || null);
   },
 
+  /** True when this user has already connected this exact mailbox. */
+  isEmailConnected(userId, emailAddress, provider = 'gmail') {
+    return query(
+      `SELECT 1 FROM email_sync_accounts
+       WHERE user_id = $1 AND provider = $2 AND email_address = $3
+         AND status = 'connected'
+       LIMIT 1`,
+      [userId, provider, emailAddress]
+    ).then((r) => Boolean(r.rows[0]));
+  },
+
   listForUser(userId) {
     return query(
       `SELECT id, provider, email_address, status, programs_found, last_synced_at, created_at, watch_expiration
-       FROM email_sync_accounts WHERE user_id = $1`,
+       FROM email_sync_accounts WHERE user_id = $1
+       ORDER BY created_at ASC`,
       [userId]
     ).then((r) => r.rows);
   },
@@ -36,18 +101,19 @@ export const EmailSyncRepo = {
          token_expires_at, status, encryption_iv, encryption_tag, history_id,
          refresh_encryption_iv, refresh_encryption_tag
        ) VALUES ($1, 'gmail', $2, $3, $4, $5, 'connected', $6, $7, $8, $9, $10)
-       ON CONFLICT (user_id, provider)
+       ON CONFLICT (user_id, provider, email_address)
        DO UPDATE SET
          oauth_token = $3, oauth_refresh_token = $4, token_expires_at = $5,
          encryption_iv = $6, encryption_tag = $7, history_id = $8,
          refresh_encryption_iv = $9, refresh_encryption_tag = $10,
-         email_address = $2, status = 'connected', updated_at = NOW()`,
+         status = 'connected', updated_at = NOW()
+       RETURNING *`,
       [
         userId, email, accessEnc.ciphertext, refreshEnc.ciphertext,
         tokens.expiry_date ? new Date(tokens.expiry_date) : null,
         accessEnc.iv, accessEnc.tag, historyId || null, refreshEnc.iv, refreshEnc.tag,
       ]
-    );
+    ).then((r) => r.rows[0]);
   },
 
   updateTokens({ accountId, accessEnc, refreshCiphertext, refreshIv, refreshTag, expiryDate }) {
@@ -90,19 +156,28 @@ export const EmailSyncRepo = {
     );
   },
 
-  disconnect(userId, provider) {
+  /**
+   * Disconnect one specific mailbox. `accountId` is required so removing a
+   * second mailbox can never delete the user's first one.
+   */
+  disconnect(userId, accountId) {
+    if (!accountId) {
+      // Legacy call without an id: refuse rather than delete every mailbox.
+      return Promise.reject(new Error('accountId is required to disconnect'));
+    }
     return query(
-      `DELETE FROM email_sync_accounts WHERE user_id = $1 AND provider = $2`,
-      [userId, provider]
+      `DELETE FROM email_sync_accounts WHERE id = $1 AND user_id = $2 RETURNING id`,
+      [accountId, userId]
     );
   },
 
   // ── sync_jobs ──────────────────────────────────────────────────
-  createJob(userId, provider) {
+  /** A job is bound to one mailbox so several connections scan independently. */
+  createJob(userId, provider, accountId = null) {
     return query(
-      `INSERT INTO sync_jobs (user_id, provider, status)
-       VALUES ($1, $2, 'queued') RETURNING *`,
-      [userId, provider]
+      `INSERT INTO sync_jobs (user_id, provider, email_sync_account_id, status)
+       VALUES ($1, $2, $3, 'queued') RETURNING *`,
+      [userId, provider, accountId]
     ).then((r) => r.rows[0]);
   },
 
@@ -189,10 +264,10 @@ export const EmailSyncRepo = {
     return query(
       `UPDATE sync_jobs
        SET status = 'completed', total_messages_found = $1, messages_processed = $2,
-           coupons_extracted = $3, programs_updated = $4,
+           programs_updated = $3,
            worker_id = NULL, locked_at = NULL, completed_at = NOW()
-       WHERE id = $5`,
-      [stats.scanned, stats.processed, stats.couponsInserted, stats.programsUpdated, jobId]
+       WHERE id = $4`,
+      [stats.scanned, stats.processed, stats.programsUpdated, jobId]
     );
   },
 
@@ -214,6 +289,102 @@ export const EmailSyncRepo = {
        LIMIT 1`,
       [domain, nameLike]
     ).then((r) => r.rows[0] || null);
+  },
+
+  async findOrCreateProgramForStatement(domain, detected) {
+    const brandName = detected.brandName || detected.programName || 'Loyalty Program';
+    const programName = detected.programName || detected.brandName || brandName;
+    const category = detected.category || 'shopping';
+    const slug = (detected.programId || brandName.toLowerCase().replace(/[^a-z0-9]+/g, '_')).slice(0, 50);
+
+    // 1. Prefer unambiguous matches: sender domain, then exact slug/name. A
+    //    name collision can never pick the wrong program here.
+    const exact = await query(
+      `SELECT id, name, category, point_value_inr, slug FROM loyalty_programs
+       WHERE (seller_domain IS NOT NULL AND seller_domain = $1)
+          OR slug = $2
+          OR LOWER(name) = LOWER($3)
+       ORDER BY CASE
+         WHEN seller_domain IS NOT NULL AND seller_domain = $1 THEN 1
+         WHEN slug = $2 THEN 2
+         ELSE 3
+       END
+       LIMIT 1`,
+      [domain, slug, programName]
+    ).then((r) => r.rows[0] || null);
+
+    if (exact) return exact;
+
+    // 2. Resolve the sender through the parser's own domain map. A program often
+    //    mails from a sibling brand (Flipkart SuperCoins arrives from
+    //    myntra.com), and that alias is only known to STATEMENT_RULES — not to
+    //    loyalty_programs.seller_domain. Matching on it keeps those statements
+    //    attached to the existing program instead of creating a duplicate.
+    const ruleProgramId = domainRuleProgramId(domain);
+    if (ruleProgramId) {
+      const viaRule = await query(
+        `SELECT id, name, category, point_value_inr, slug FROM loyalty_programs
+         WHERE slug = $1
+         LIMIT 1`,
+        [ruleProgramId]
+      ).then((r) => r.rows[0] || null);
+
+      if (viaRule) return viaRule;
+    }
+
+    // 3. Fuzzy name match, but ONLY when the sender is a domain we already
+    //    trust (a catalogue seller_domain or a known parser alias). The AI
+    //    extractor emits short generic names ("Rewards", "Points", "Miles"), so
+    //    a bare LIKE on an untrusted sender matches whichever catalogue row
+    //    sorts first and silently overwrites an unrelated account's balance.
+    if (domain && (await isTrustedSenderDomain(domain))) {
+      const fuzzy = await query(
+        `SELECT id, name, category, point_value_inr, slug FROM loyalty_programs
+         WHERE LOWER(name) LIKE LOWER($1)
+           AND LENGTH(name) - LENGTH(REPLACE(LOWER(name), LOWER($2), ''))
+               >= LENGTH($2)
+         ORDER BY CHAR_LENGTH(name) ASC
+         LIMIT 1`,
+        [`%${programName}%`, programName]
+      ).then((r) => r.rows[0] || null);
+
+      if (fuzzy) return fuzzy;
+    }
+
+    // 4. Not in the static catalogue: register it dynamically so the user's
+    //    points are still tracked.
+    try {
+      const created = await query(
+        `INSERT INTO loyalty_programs (
+           name, category, logo_initial, accent_color, point_value_inr, seller_domain, slug, email_parser_enabled
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+         ON CONFLICT (name, category) DO UPDATE SET email_parser_enabled = true
+         RETURNING id, name, category, point_value_inr, slug`,
+        [
+          programName,
+          category,
+          programName.substring(0, 2).toUpperCase(),
+          detected.accentColor || '#01A2FB',
+          // Always the conservative default, never a caller-supplied value.
+          // point_value_inr feeds the portfolio value shown to the user, and a
+          // fabricated estimate (e.g. from the AI extractor) would silently
+          // corrupt it. A human can correct this row later.
+          DEFAULT_POINT_VALUE_INR,
+          domain || null,
+          slug,
+        ]
+      ).then((r) => r.rows[0]);
+      return created;
+    } catch (err) {
+      // If conflict on slug or other constraint, fetch fallback
+      const fallback = await query(
+        `SELECT id, name, category, point_value_inr, slug FROM loyalty_programs
+         WHERE LOWER(name) = LOWER($1) OR slug = $2
+         LIMIT 1`,
+        [programName, slug]
+      ).then((r) => r.rows[0] || null);
+      return fallback;
+    }
   },
 
   findStatementAccount(userId, programId) {
@@ -258,26 +429,31 @@ export const EmailSyncRepo = {
       `INSERT INTO email_statements (
          user_id, email_sync_account_id, from_email, subject, received_at,
          matched_program_id, extracted_balance, extracted_account_number,
-         extracted_expiry_date, parser_confidence, parsed_successfully, raw_text_preview
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11)`,
-      fields
-    );
-  },
-
-  insertCoupon(fields) {
-    return query(
-      `INSERT INTO extracted_coupons (
-         user_id, program_id, merchant_name, category, coupon_code, coupon_type,
-         title, description, discount_value, minimum_spend_inr, expiry_date,
-         email_message_id_hash, source_email_subject, source_sender, confidence_score
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-       ON CONFLICT (user_id, coupon_code, email_message_id_hash) DO NOTHING
-       RETURNING id`,
+         extracted_expiry_date, parser_confidence, parsed_successfully, raw_text_preview,
+         extraction_source
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, $12)`,
       fields
     );
   },
 
   // ── scan result reads ──────────────────────────────────────────
+  /**
+   * Every domain a scan should search, not just each program's primary
+   * `seller_domain`. Programs routinely mail from a sibling brand (Flipkart
+   * SuperCoins statements arrive from myntra.com), and those statements are
+   * only discoverable if their real sender domain is searched. Mirrors the
+   * `domains` lists in the parser's STATEMENT_RULES.
+   */
+  searchDomains() {
+    return query(
+      `SELECT seller_domain, name FROM loyalty_programs WHERE seller_domain IS NOT NULL`
+    ).then((r) => {
+      const primary = r.rows.map((x) => x.seller_domain).filter(Boolean);
+      return [...new Set([...primary, ...STATEMENT_RULES.flatMap((rule) => rule.domains)])];
+    });
+  },
+
+  /** Primary (catalogue) domains only — used for the program lookup. */
   sellerDomains() {
     return query(
       'SELECT seller_domain, name FROM loyalty_programs WHERE seller_domain IS NOT NULL'
@@ -292,15 +468,6 @@ export const EmailSyncRepo = {
        WHERE la.user_id = $1 AND la.is_active = true
        ORDER BY la.last_synced_at DESC NULLS LAST`,
       [userId]
-    ).then((r) => r.rows);
-  },
-
-  recentCoupons(userId, limit = 50) {
-    return query(
-      `SELECT * FROM extracted_coupons
-       WHERE user_id = $1 AND is_used = false
-       ORDER BY created_at DESC LIMIT $2`,
-      [userId, limit]
     ).then((r) => r.rows);
   },
 };

@@ -124,6 +124,21 @@ export const ProfileTabIcon: React.FC<TabIconProps> = ({
   color = focused ? "#00A3FF" : "#6A6A74",
   size = 22,
 }) => {
+  if (focused) {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Circle cx="12" cy="7" r="4.5" fill={color} />
+        <Path
+          d="M4 20.5C4 16.5 7.5 13.5 12 13.5C16.5 13.5 20 16.5 20 20.5"
+          fill={color}
+          stroke={color}
+          strokeWidth={1.5}
+          strokeLinecap="round"
+        />
+      </Svg>
+    );
+  }
+
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       {/* Head circle */}
@@ -133,7 +148,6 @@ export const ProfileTabIcon: React.FC<TabIconProps> = ({
         r="4"
         stroke={color}
         strokeWidth={2}
-        fill={focused ? color : "none"}
       />
       {/* Shoulders arc */}
       <Path
@@ -141,7 +155,6 @@ export const ProfileTabIcon: React.FC<TabIconProps> = ({
         stroke={color}
         strokeWidth={2}
         strokeLinecap="round"
-        fill={focused ? (color === "#00A3FF" ? "#E6F6FF" : "none") : "none"}
       />
     </Svg>
   );

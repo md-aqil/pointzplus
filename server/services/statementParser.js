@@ -1,5 +1,10 @@
-// server/services/statementAndCouponParser.js
-// High-Performance Deterministic Statement & Coupon Parser Engine
+// server/services/statementParser.js
+// Deterministic loyalty-statement parser.
+//
+// Points only: coupon/promo-token extraction was removed because it produced a
+// high false-positive rate (bank account numbers and shipment tracking IDs were
+// persisted as "coupon codes"). This module now extracts balances, expiry and
+// account numbers from loyalty statements and nothing else.
 
 import crypto from 'crypto';
 
@@ -35,7 +40,7 @@ export const STATEMENT_RULES = [
     category: 'airlines',
     domains: ['airvistara.com', 'vistara.com'],
     subjectKeywords: ['club vistara', 'cv points', 'statement'],
-    balanceRegex: /(?:cv points|points balance|available points)[:\s]*([0-9,]+)/i,
+    balanceRegex: /(?:cv points|points balance|available points|total miles|miles balance|available miles)[:\s]*([0-9,]+)/i,
     accountRegex: /(?:cv id|membership no|id)[:\s#]*([0-9*-]{6,12})/i,
     expiryRegex: /([0-9,]+)\s*(?:cv points|points)\s*expir(?:e|ing)\s*(?:on)?\s*([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4})/i,
     pointValueINR: 0.60,
@@ -101,7 +106,7 @@ export const STATEMENT_RULES = [
     category: 'banking',
     domains: ['sbicard.com', 'sbirewardz.com'],
     subjectKeywords: ['sbi card', 'reward points statement', 'rewardz balance'],
-    balanceRegex: /(?:reward points balance|total reward points|balance)[:\s]*([0-9,]+)/i,
+    balanceRegex: /(?:reward points balance|total reward points|rewardz balance|reward points|points balance)[:\s]*([0-9,]+)/i,
     accountRegex: /(?:card ending|account no)[:\s#]*([0-9*]{4})/i,
     expiryRegex: /([0-9,]+)\s*points\s*expire\s*(?:on)?\s*([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4})/i,
     pointValueINR: 0.25,
@@ -143,9 +148,11 @@ export const STATEMENT_RULES = [
     programId: 'flipkart_supercoins',
     programName: 'Flipkart SuperCoins',
     category: 'shopping',
-    domains: ['flipkart.com', 'flipkartemail.com'],
+    domains: ['flipkart.com', 'flipkartemail.com', 'myntra.com'],
     subjectKeywords: ['supercoins', 'supercoin statement', 'coins added', 'balance update'],
-    balanceRegex: /(?:supercoins?|coins balance|available coins)[:\s]*([0-9,]+)/i,
+    // Both orders occur in the wild: "SuperCoins: 899" (body) and
+    // "18 SuperCoins on the way!" (Myntra/Flipkart subject line).
+    balanceRegex: /(?:supercoins?|coins balance|available coins)[:\s]*([0-9,]+)|([0-9,]+)\s*(?:supercoins?|coins)\b/i,
     accountRegex: /(?:user|account|member)[:\s#]*([A-Za-z0-9_*-]{4,10})/i,
     expiryRegex: /([0-9,]+)\s*coins\s*expir(?:e|ing)\s*(?:on)?\s*([0-9]{1,2}\s+[A-Za-z]+\s+[0-9]{4})/i,
     pointValueINR: 1.00,
@@ -219,9 +226,9 @@ export const STATEMENT_RULES = [
 ];
 
 /**
- * Deterministic Statement & Coupon Parser Engine
+ * Deterministic loyalty-statement parser for the supported programs.
  */
-export class StatementAndCouponParser {
+export class StatementParser {
 
   /**
    * Generates a stable SHA-256 hash for message idempotency & deduplication
@@ -246,222 +253,139 @@ export class StatementAndCouponParser {
     const subject = subjectHeader.toLowerCase();
     const htmlStripped = bodyHtml ? bodyHtml.replace(/<[^>]+>/g, ' ') : '';
     const fullContent = `${bodyText} ${htmlStripped}`;
-    const hash = this.generateMessageHash(messageId, fromHeader, subjectHeader, receivedDate);
 
-    // 1. Try Loyalty Statement Parsing
+    // Loyalty statements only — coupon extraction was removed.
     const loyaltyData = this.parseLoyaltyStatement(from, subject, fullContent, receivedDate);
 
-    // 2. Try Coupon & Voucher Token Parsing
-    const couponData = this.parseCouponTokens(fromHeader, subjectHeader, fullContent, bodyHtml, receivedDate, hash);
-
     return {
-      messageIdHash: hash,
+      messageIdHash: this.generateMessageHash(messageId, fromHeader, subjectHeader, receivedDate),
       isLoyaltyStatement: !!loyaltyData,
       loyaltyData,
-      isCoupon: !!couponData,
-      couponData,
     };
+  }
+
+  /**
+   * Keywords that appear on almost every statement and therefore identify
+   * nothing. Without penalising them, a longer-but-generic term like
+   * "statement" outranks a short-but-distinctive one like "regalia", and the
+   * wrong programme wins.
+   */
+  static get WEAK_SUBJECT_KEYWORDS() {
+    return new Set([
+      'statement', 'e-statement', 'activity', 'summary', 'update',
+      'account update', 'balance update', 'points summary', 'monthly activity',
+      'points statement', 'credit card statement', 'activity update',
+    ]);
+  }
+
+  /**
+   * Rank candidate rules for an email instead of taking the first hit.
+   *
+   * The old code used `STATEMENT_RULES.find(...)`, which is first-match-wins.
+   * Several rules list the bare word "statement" as a subject keyword
+   * (intermiles, air_india, club_vistara), so ANY email whose subject contained
+   * "statement" was captured by whichever rule came first in the file — an HDFC
+   * "Regalia Points Statement" was attributed to InterMiles and wrote its
+   * balance to the wrong account.
+   *
+   * Ordering now prefers:
+   *   1. a sender-domain match (the most reliable signal), then
+   *   2. subject matches ranked by how distinctive the keyword is. Generic terms
+   *      are demoted to a near-zero score so a specific brand phrase always wins.
+   */
+  static rankRules(from, subject) {
+    const weak = this.WEAK_SUBJECT_KEYWORDS;
+    const byDomain = [];
+    const bySubject = [];
+
+    for (const rule of STATEMENT_RULES) {
+      if ((rule.domains || []).some((d) => from.includes(d))) {
+        byDomain.push({ rule, score: Infinity, generic: false });
+        continue;
+      }
+      const hits = (rule.subjectKeywords || []).filter((k) => subject.includes(k));
+      if (hits.length > 0) {
+        // Specific keyword: longer term scores higher. Generic terms are pushed
+        // to the bottom regardless of length.
+        const score = Math.max(...hits.map((k) => (weak.has(k) ? 1 : k.length + 10)));
+        bySubject.push({ rule, score, generic: score === 1 });
+      }
+    }
+
+    bySubject.sort((a, b) => b.score - a.score);
+    return [...byDomain, ...bySubject];
   }
 
   /**
    * Parses Loyalty Statement balances & expiration
    */
   static parseLoyaltyStatement(from, subject, content, date) {
-    const matchedRule = STATEMENT_RULES.find(rule => {
-      const matchDomain = rule.domains.some(d => from.includes(d));
-      const matchSubject = rule.subjectKeywords.some(k => subject.includes(k));
-      return matchDomain || matchSubject;
-    });
+    for (const { rule: matchedRule, generic } of this.rankRules(from, subject)) {
+      // A generic-keyword-only candidate (e.g. a subject that merely says
+      // "statement") identifies no brand. It may only be used if nothing more
+      // specific claimed the message — never as a fallback for a stronger
+      // candidate that simply failed to parse. Guessing here writes one
+      // program's balance onto another's account, which is worse than
+      // extracting nothing.
+      if (generic) break;
 
-    if (!matchedRule) return null;
+      // A rule that matched the identity signal but whose balance pattern does
+      // not fit this message must not win — fall through to the next candidate.
+      const balanceMatch =
+        content.match(matchedRule.balanceRegex) || subject.match(matchedRule.balanceRegex);
+      if (!balanceMatch) continue;
 
-    // 1. Balance Match
-    const balanceMatch = content.match(matchedRule.balanceRegex) || subject.match(matchedRule.balanceRegex);
-    if (!balanceMatch) return null;
+      const balanceRaw = balanceMatch[1] ?? balanceMatch[2];
+      const balanceNum = parseInt(String(balanceRaw ?? '').replace(/,/g, ''), 10);
+      if (isNaN(balanceNum) || balanceNum < 0 || balanceNum > 50000000) continue;
 
-    const balanceNum = parseInt(balanceMatch[1].replace(/,/g, ''), 10);
-    if (isNaN(balanceNum) || balanceNum < 0 || balanceNum > 50000000) return null;
+      // 2. Account Number Match
+      let accountNumber = 'MEMBER-***';
+      const accountMatch = content.match(matchedRule.accountRegex);
+      if (accountMatch && accountMatch[1]) {
+        accountNumber = accountMatch[1].trim();
+      }
 
-    // 2. Account Number Match
-    let accountNumber = 'MEMBER-***';
-    const accountMatch = content.match(matchedRule.accountRegex);
-    if (accountMatch && accountMatch[1]) {
-      accountNumber = accountMatch[1].trim();
-    }
-
-    // 3. Expiry Match
-    let expiringPoints = 0;
-    let expiryDate = null;
-    if (matchedRule.expiryRegex) {
-      const expMatch = content.match(matchedRule.expiryRegex);
-      if (expMatch) {
-        if (expMatch[1]) expiringPoints = parseInt(expMatch[1].replace(/,/g, ''), 10) || 0;
-        if (expMatch[2]) {
-          const parsedDate = new Date(expMatch[2]);
-          if (!isNaN(parsedDate.getTime())) {
-            expiryDate = parsedDate.toISOString();
+      // 3. Expiry Match
+      let expiringPoints = 0;
+      let expiryDate = null;
+      if (matchedRule.expiryRegex) {
+        const expMatch = content.match(matchedRule.expiryRegex);
+        if (expMatch) {
+          if (expMatch[1]) expiringPoints = parseInt(expMatch[1].replace(/,/g, ''), 10) || 0;
+          if (expMatch[2]) {
+            const parsedDate = new Date(expMatch[2]);
+            if (!isNaN(parsedDate.getTime())) {
+              expiryDate = parsedDate.toISOString();
+            }
           }
         }
       }
-    }
 
-    // Fallback general expiry detection if program didn't catch it
-    if (!expiryDate) {
-      const generalExp = content.match(/(?:expiring on|expires on|valid until|points expiring)[:\s]*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4}|[0-9]{1,2}\s+[A-Za-z]{3,}\s+[0-9]{4})/i);
-      if (generalExp && generalExp[1]) {
-        const d = new Date(generalExp[1]);
-        if (!isNaN(d.getTime())) expiryDate = d.toISOString();
-      }
-    }
-
-    return {
-      programId: matchedRule.programId,
-      programName: matchedRule.programName,
-      category: matchedRule.category,
-      pointValueINR: matchedRule.pointValueINR,
-      balance: balanceNum,
-      accountNumber,
-      expiringPoints,
-      expiryDate,
-      confidence: 0.98,
-      sourceDate: date,
-    };
-  }
-
-  /**
-   * Parses Promotional Coupons, Discount Vouchers, and Promo Codes
-   */
-  static parseCouponTokens(fromHeader, subjectHeader, content, rawHtml, date, hash) {
-    // Coupon Code Matchers
-    const CODE_PATTERNS = [
-      /(?:use code|apply coupon|coupon code|promo code|voucher code|discount code)[:\s*]+([A-Z0-9_-]{4,18})\b/i,
-      /\bcode[:\s]+<b>([A-Z0-9_-]{4,18})<\/b>/i,
-      /\bcode[:\s]+"?([A-Z0-9_-]{4,18})"?\b/i,
-      /\b([A-Z]{3,8}[0-9]{2,6})\b/, // e.g., SAVE200, DISK50, WELCOME100, VISTA25
-    ];
-
-    // Discount Value Matchers
-    const DISCOUNT_PATTERNS = [
-      /\b([0-9]{1,2}%\s*(?:off|discount|cashback))\b/i,
-      /(?:flat|save|get)\s*(?:₹|rs\.?|inr)\s*([0-9,]+)\s*(?:off|cashback|discount)?/i,
-      /(?:₹|rs\.?|inr)\s*([0-9,]+)\s*(?:off|cashback|discount|voucher)/i,
-      /\b(2X|3X|5X)\s*(?:points|multiplier|rewards)\b/i,
-      /\b(free\s+[0-9a-zA-Z\s]{3,20}(?:pass|subscription|delivery|stay))\b/i,
-    ];
-
-    // 1. Extract Coupon Code
-    let couponCode = null;
-    for (const pattern of CODE_PATTERNS) {
-      const match = rawHtml.match(pattern) || content.match(pattern) || subjectHeader.match(pattern);
-      if (match && match[1]) {
-        const candidate = match[1].trim().toUpperCase();
-        // Discard common false positives like "HTTP", "HTML", "GMAIL"
-        if (!['HTTP', 'HTTPS', 'HTML', 'GMAIL', 'EMAIL', 'ORDER', 'INVOICE'].includes(candidate)) {
-          couponCode = candidate;
-          break;
+      // Fallback general expiry detection if program didn't catch it
+      if (!expiryDate) {
+        const generalExp = content.match(/(?:expiring on|expires on|valid until|points expiring)[:\s]*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4}|[0-9]{1,2}\s+[A-Za-z]{3,}\s+[0-9]{4})/i);
+        if (generalExp && generalExp[1]) {
+          const d = new Date(generalExp[1]);
+          if (!isNaN(d.getTime())) expiryDate = d.toISOString();
         }
       }
+
+      return {
+        programId: matchedRule.programId,
+        programName: matchedRule.programName,
+        category: matchedRule.category,
+        pointValueINR: matchedRule.pointValueINR,
+        balance: balanceNum,
+        accountNumber,
+        expiringPoints,
+        expiryDate,
+        confidence: 0.98,
+        sourceDate: date,
+      };
     }
 
-    // 2. Extract Discount Value
-    let discountValue = null;
-    for (const pattern of DISCOUNT_PATTERNS) {
-      const match = content.match(pattern) || subjectHeader.match(pattern);
-      if (match) {
-        discountValue = match[0].trim();
-        break;
-      }
-    }
-
-    // If neither a valid coupon code nor a clear promotional discount was found, skip
-    if (!couponCode && !discountValue) {
-      return null;
-    }
-
-    // 3. Extract Expiry Date
-    let expiryDate = null;
-    const expMatch = content.match(/(?:valid (?:till|until)|expires on|valid through|use before|ends on)[:\s]*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4}|[0-9]{1,2}\s+[A-Za-z]{3,}\s+[0-9]{4})/i);
-    if (expMatch && expMatch[1]) {
-      const d = new Date(expMatch[1]);
-      if (!isNaN(d.getTime())) {
-        expiryDate = d.toISOString();
-      }
-    }
-
-    // 4. Extract Minimum Spend Requirement
-    let minimumSpendINR = 0;
-    const minSpendMatch = content.match(/(?:min(?:imum)?\s*(?:order|spend|purchase|cart)\s*(?:of|value)?)\s*(?:₹|rs\.?|inr)?\s*([0-9,]+)/i);
-    if (minSpendMatch && minSpendMatch[1]) {
-      minimumSpendINR = parseFloat(minSpendMatch[1].replace(/,/g, '')) || 0;
-    }
-
-    // 5. Determine Merchant & Category
-    const { merchantName, category } = this.resolveMerchantAndCategory(fromHeader, subjectHeader);
-
-    // 6. Generate Clean Title & Description
-    const title = discountValue 
-      ? `${discountValue} at ${merchantName}`
-      : `Exclusive Promo Code: ${couponCode}`;
-
-    const description = subjectHeader.length > 80 
-      ? `${subjectHeader.substring(0, 77)}...` 
-      : subjectHeader;
-
-    return {
-      merchantName,
-      category,
-      couponCode: couponCode || 'AUTO-APPLY',
-      couponType: 'discount_code',
-      title,
-      description,
-      discountValue: discountValue || 'Special Discount',
-      minimumSpendINR,
-      expiryDate: expiryDate || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // Default 14 days
-      emailMessageIdHash: hash,
-      sourceEmailSubject: subjectHeader,
-      sourceSender: fromHeader,
-      confidenceScore: couponCode ? 0.98 : 0.85,
-    };
+    return null;
   }
 
-  /**
-   * Helper to map sender domain to clean Merchant Name and Category
-   */
-  static resolveMerchantAndCategory(fromHeader, subjectHeader) {
-    const lower = `${fromHeader} ${subjectHeader}`.toLowerCase();
-
-    if (lower.includes('swiggy') || lower.includes('zomato') || lower.includes('dominos') || lower.includes('eats')) {
-      const merchant = lower.includes('swiggy') ? 'Swiggy' : (lower.includes('zomato') ? 'Zomato' : 'Dominos');
-      return { merchantName: merchant, category: 'dining' };
-    }
-    if (lower.includes('airindia') || lower.includes('vistara') || lower.includes('indigo') || lower.includes('intermiles') || lower.includes('airline')) {
-      const merchant = lower.includes('vistara') ? 'Club Vistara' : (lower.includes('indigo') ? 'IndiGo' : 'Air India');
-      return { merchantName: merchant, category: 'airlines' };
-    }
-    if (lower.includes('marriott') || lower.includes('hilton') || lower.includes('taj') || lower.includes('hotel') || lower.includes('booking')) {
-      const merchant = lower.includes('marriott') ? 'Marriott Bonvoy' : (lower.includes('hilton') ? 'Hilton' : 'Taj Hotels');
-      return { merchantName: merchant, category: 'hotels' };
-    }
-    if (lower.includes('flipkart') || lower.includes('amazon') || lower.includes('myntra') || lower.includes('ajio') || lower.includes('nykaa')) {
-      const merchant = lower.includes('flipkart') ? 'Flipkart' : (lower.includes('amazon') ? 'Amazon' : 'Myntra');
-      return { merchantName: merchant, category: 'shopping' };
-    }
-    if (lower.includes('cult.fit') || lower.includes('curefit') || lower.includes('health') || lower.includes('pharmeasy')) {
-      return { merchantName: 'Cult.fit', category: 'health' };
-    }
-    if (lower.includes('bookmyshow') || lower.includes('pvr') || lower.includes('inox') || lower.includes('entertainment')) {
-      return { merchantName: 'BookMyShow', category: 'entertainment' };
-    }
-    if (lower.includes('hdfc') || lower.includes('sbi') || lower.includes('icici') || lower.includes('axis') || lower.includes('amex')) {
-      const merchant = lower.includes('hdfc') ? 'HDFC Bank' : (lower.includes('sbi') ? 'SBI Card' : 'ICICI Bank');
-      return { merchantName: merchant, category: 'banking' };
-    }
-
-    // Fallback: extract domain name
-    const domainMatch = fromHeader.match(/@([a-zA-Z0-9.-]+)\./);
-    const rawDomain = domainMatch ? domainMatch[1].replace(/^(mail|alerts|news|info|no-reply|notifications)\./i, '') : 'Partner';
-    const merchantName = rawDomain.charAt(0).toUpperCase() + rawDomain.slice(1);
-
-    return { merchantName, category: 'shopping' };
-  }
 }

@@ -4,7 +4,8 @@ import crypto from 'crypto';
 import { google } from 'googleapis';
 import { JWT_SECRET } from '../middleware/auth.js';
 import { encryptToken, decryptToken } from '../crypto.js';
-import { StatementAndCouponParser } from './statementAndCouponParser.js';
+import { StatementParser } from './statementParser.js';
+import { AIStatementParser } from './aiStatementParser.service.js';
 import { EmailSyncRepo } from '../repositories/emailSync.repo.js';
 import { notifyJobQueued } from '../lib/workerBus.js';
 
@@ -118,16 +119,31 @@ export async function isAuthorizedPubSubRequest(req) {
 
 // ─── Gmail search & body helpers ─────────────────────────────────
 
-export function buildLoyaltySearchQuery(domains = []) {
+// How far back a scan looks. Overridable so a deliberate deep rescan can
+// recover older statements (e.g. SYNC_LOOKBACK_DAYS=1825 for ~5 years)
+// without editing code. Defaults to the normal 60-day window.
+const SYNC_LOOKBACK_DAYS = Math.max(
+  1,
+  Number.parseInt(process.env.SYNC_LOOKBACK_DAYS || '60', 10) || 60
+);
+
+// Share of each scan's message cap reserved for the keyword search, so a
+// statement from an uncatalogued sender is still reachable. The floor is 5.
+const KEYWORD_BUDGET_RATIO = 0.3;
+
+// Broad terms used to find loyalty mail whose sender is not in the catalogue.
+// Kept as a standalone constant so the keyword-only phase can reuse it.
+const KEYWORD_TERMS =
+  'points OR miles OR "reward points" OR SuperCoins OR statement OR "reward balance" OR "points balance" OR "loyalty statement" OR "points statement"';
+
+export function buildLoyaltySearchQuery(domains = [], lookbackDays = SYNC_LOOKBACK_DAYS) {
   const unique = [...new Set(domains.filter(Boolean))];
   const domainFilters = unique.slice(0, 25).map((d) => `from:${d}`).join(' OR ');
-  const keywords =
-    'points OR miles OR "reward points" OR SuperCoins OR statement OR coupon OR voucher OR "use code" OR "promo code" OR "reward balance"';
-  const dateFilter = 'newer_than:60d';
+  const dateFilter = `newer_than:${lookbackDays}d`;
   if (domainFilters) {
-    return `((${domainFilters}) OR (${keywords})) ${dateFilter}`;
+    return `((${domainFilters}) OR (${KEYWORD_TERMS})) ${dateFilter}`;
   }
-  return `(${keywords}) ${dateFilter}`;
+  return `(${KEYWORD_TERMS}) ${dateFilter}`;
 }
 
 export function extractDomain(fromHeader) {
@@ -163,10 +179,8 @@ export function extractBodyParts(payload) {
 
 async function persistLoyaltyResult(userId, parsed, fromHeader, subjectHeader, receivedAt, preview, provider, syncAccountId) {
   const detected = parsed.loyaltyData;
-  const program = await EmailSyncRepo.findProgramForStatement(
-    extractDomain(fromHeader),
-    `%${detected.programName || detected.programId || ''}%`
-  );
+  const domain = extractDomain(fromHeader);
+  const program = await EmailSyncRepo.findOrCreateProgramForStatement(domain, detected);
   if (!program) return { added: false, updated: false };
 
   const existing = await EmailSyncRepo.findStatementAccount(userId, program.id);
@@ -196,32 +210,56 @@ async function persistLoyaltyResult(userId, parsed, fromHeader, subjectHeader, r
     userId, syncAccountId, fromHeader, subjectHeader, receivedAt || new Date(),
     program.id, detected.balance, detected.accountNumber, detected.expiryDate,
     detected.confidence || 0.95, preview || null,
+    // Which engine produced this value, so a balance can be audited or re-run.
+    parsed.source === 'ai_extractor' ? 'ai_extractor' : 'rule_parser',
   ]);
 
   return { added, updated, accountId, program };
 }
 
-async function persistCouponResult(userId, couponData, programId = null) {
-  if (!couponData?.couponCode) return false;
-  try {
-    const result = await EmailSyncRepo.insertCoupon([
-      userId, programId, couponData.merchantName, couponData.category || 'shopping',
-      couponData.couponCode, couponData.couponType || 'discount_code',
-      couponData.title, couponData.description || null, couponData.discountValue,
-      couponData.minimumSpendINR || 0, couponData.expiryDate,
-      couponData.emailMessageIdHash, couponData.sourceEmailSubject,
-      couponData.sourceSender, couponData.confidenceScore || 0.95,
-    ]);
-    return result.rows.length > 0;
-  } catch (err) {
-    console.error('Persist coupon error:', err.message);
-    return false;
-  }
-}
-
 // ─── Scan pipeline ───────────────────────────────────────────────
 
-async function scanGmailMessages(account, { maxResults = 40, historyId = null, jobId = null } = {}) {
+
+const FETCH_DELAY_MS = Math.max(0, Number.parseInt(process.env.SYNC_FETCH_DELAY_MS || '120', 10) || 120);
+const QUOTA_MAX_RETRIES = 4;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Fetch one message with pacing + exponential backoff.
+ * A deep lookback pulls 100+ full messages, which trips Gmail's per-minute
+ * `Total Query Cost` quota; without backoff every remaining message fails and
+ * the scan silently records 0 programs.
+ */
+async function fetchMessageWithBackoff(gmail, id) {
+  let lastErr;
+  for (let attempt = 0; attempt <= QUOTA_MAX_RETRIES; attempt++) {
+    try {
+      if (FETCH_DELAY_MS) await sleep(FETCH_DELAY_MS);
+      return await gmail.users.messages.get({ userId: 'me', id, format: 'full' });
+    } catch (err) {
+      lastErr = err;
+      const isQuota = /quota|rateLimit|rate limit|429|403/i.test(err.message || '');
+      if (!isQuota || attempt === QUOTA_MAX_RETRIES) break;
+      // 1s, 2s, 4s, 8s — enough headroom for the quota window to reopen.
+      await sleep(1000 * 2 ** attempt);
+      console.warn(`Gmail quota hit on message ${id}; retry ${attempt + 1}/${QUOTA_MAX_RETRIES}`);
+    }
+  }
+  throw lastErr;
+}
+
+// Cap on messages fetched per scan. A deep lookback needs headroom, so the
+// cap scales with SYNC_LOOKBACK_DAYS (60d -> 40, ~5y -> 200).
+const DEFAULT_MAX_RESULTS = 40;
+
+function resolveMaxResults() {
+  const override = Number.parseInt(process.env.SYNC_MAX_RESULTS || '', 10);
+  if (Number.isFinite(override) && override > 0) return override;
+  return Math.min(200, Math.round(DEFAULT_MAX_RESULTS * (SYNC_LOOKBACK_DAYS / 60)));
+}
+
+async function scanGmailMessages(account, { maxResults = null, historyId = null, jobId = null } = {}) {
+  const cap = maxResults || resolveMaxResults();
   const oAuth2Client = createOAuthClient();
   const refreshPlaintext = decryptToken(
     account.oauth_refresh_token,
@@ -256,7 +294,7 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null, j
   });
 
   const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
-  const domains = await EmailSyncRepo.sellerDomains();
+  const domains = await EmailSyncRepo.searchDomains();
   const searchQuery = buildLoyaltySearchQuery(domains);
 
   let messages = [];
@@ -272,19 +310,78 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null, j
     }
 
     if (messages.length === 0) {
-      const listRes = await gmail.users.messages.list({
-        userId: 'me',
-        q: searchQuery,
-        maxResults,
-      });
-      messages = listRes.data.messages || [];
+      // Two-phase search. A single combined query returns the *newest* N
+      // matches, and the broad keyword branch (points/statement) is
+      // dominated by newsletters — so loyalty mail beyond the cap is never
+      // seen. Phase 1 queries each program domain directly (these are
+      // unambiguous), phase 2 tops up with the keyword search using whatever
+      // budget is left. A deep lookback therefore actually reaches old mail.
+      const perDomain = Math.max(
+        1,
+        Math.ceil(cap / Math.max(1, domains.length))
+      );
+      const domainQueries = domains.map((d) => `from:${d} newer_than:${SYNC_LOOKBACK_DAYS}d`);
+
+      const domainResults = await Promise.all(
+        domainQueries.map((q) =>
+          gmail.users
+            .messages
+            .list({ userId: 'me', q, maxResults: perDomain })
+            .then((r) => r.data.messages || [])
+            .catch((e) => {
+              console.warn(`Gmail domain search failed (${q}):`, e.message);
+              return [];
+            })
+        )
+      );
+
+      const seen = new Set();
+      for (const list of domainResults) {
+        for (const m of list) {
+          if (!seen.has(m.id)) {
+            seen.add(m.id);
+            messages.push(m);
+          }
+        }
+      }
+
+      // Top up with keyword matches. A slice of the budget is always reserved:
+      // when every program domain is well represented the domain pass alone can
+      // fill the cap, and a statement from a sender the catalogue does not know
+      // (so no `from:` filter would match) could never be found at all.
+      const keywordBudget = Math.max(
+        5,
+        Math.floor(cap * KEYWORD_BUDGET_RATIO),
+        0
+      );
+      const domainBudget = Math.max(0, cap - keywordBudget);
+      const remaining = Math.min(keywordBudget, Math.max(0, domainBudget - messages.length));
+
+      if (remaining > 0) {
+        // Keyword-only here (not the combined query): any `from:` clause would
+        // just re-return the domain matches already collected in phase 1.
+        const listRes = await gmail.users.messages.list({
+          userId: 'me',
+          q: `(${KEYWORD_TERMS}) newer_than:${SYNC_LOOKBACK_DAYS}d`,
+          maxResults: remaining,
+        });
+        for (const m of listRes.data.messages || []) {
+          if (!seen.has(m.id)) {
+            seen.add(m.id);
+            messages.push(m);
+          }
+        }
+      }
+
+      // Newest first so the capped set reflects current balances.
+      messages.sort((a, b) => (Number(b.internalDate) || b.id?.length || 0) - (Number(a.internalDate) || a.id?.length || 0));
     }
   } catch (searchErr) {
     console.warn('Gmail search fallback:', searchErr.message);
     const fallbackRes = await gmail.users.messages.list({
       userId: 'me',
-      q: '(points OR miles OR coupon OR voucher OR "reward points" OR statement) newer_than:60d',
-      maxResults: 20,
+      q: `(points OR miles OR "reward points" OR "points balance" OR statement) newer_than:${SYNC_LOOKBACK_DAYS}d`,
+      maxResults: Math.min(20, cap),
     });
     messages = fallbackRes.data.messages || [];
   }
@@ -296,28 +393,22 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null, j
   }
 
   const detectedAccounts = [];
-  const extractedCoupons = [];
   let programsAdded = 0;
   let programsUpdated = 0;
-  let couponsInserted = 0;
   let processed = 0;
 
   for (const msg of messages) {
     try {
-      const detail = await gmail.users.messages.get({
-        userId: 'me',
-        id: msg.id,
-        format: 'full',
-      });
+      const detail = await fetchMessageWithBackoff(gmail, msg.id);
 
-      const headers = detail.data.payload.headers || [];
+      const headers = detail.data.payload?.headers || [];
       const fromHeader = headers.find((h) => h.name.toLowerCase() === 'from')?.value || '';
       const subjectHeader = headers.find((h) => h.name.toLowerCase() === 'subject')?.value || '';
       const dateHeader = headers.find((h) => h.name.toLowerCase() === 'date')?.value || new Date();
       const { text, html } = extractBodyParts(detail.data.payload);
       const preview = (text || html.replace(/<[^>]+>/g, ' ')).substring(0, 200);
 
-      const parsed = StatementAndCouponParser.parseEmail({
+      const parsed = await AIStatementParser.parseEmail({
         messageId: msg.id,
         fromHeader,
         subjectHeader,
@@ -326,7 +417,6 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null, j
         receivedDate: dateHeader,
       });
 
-      let programId = null;
       if (parsed.isLoyaltyStatement && parsed.loyaltyData) {
         const persist = await persistLoyaltyResult(
           account.user_id, parsed, fromHeader, subjectHeader,
@@ -334,7 +424,6 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null, j
         );
         if (persist.added) programsAdded += 1;
         if (persist.updated) programsUpdated += 1;
-        programId = persist.program?.id || null;
         detectedAccounts.push({
           from: fromHeader,
           domain: extractDomain(fromHeader),
@@ -343,14 +432,6 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null, j
           preview,
           ...parsed.loyaltyData,
         });
-      }
-
-      if (parsed.isCoupon && parsed.couponData) {
-        const inserted = await persistCouponResult(account.user_id, parsed.couponData, programId);
-        if (inserted) {
-          couponsInserted += 1;
-          extractedCoupons.push(parsed.couponData);
-        }
       }
 
       processed += 1;
@@ -378,13 +459,9 @@ async function scanGmailMessages(account, { maxResults = 40, historyId = null, j
     processed,
     programsAdded,
     programsUpdated,
-    couponsInserted,
     accounts: detectedAccounts,
-    coupons: extractedCoupons,
   };
 }
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Execute one already-claimed sync job. Invoked by the background worker.
@@ -392,8 +469,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * queued, so the job survives an API restart between queueing and execution.
  */
 export async function processSyncJob(job) {
-  const account = await EmailSyncRepo.findConnected(job.user_id, job.provider);
-  if (!account) {
+  // Prefer the mailbox this job was queued for; fall back to the first connected
+  // account so jobs created before the column existed still run.
+  const account = job.email_sync_account_id
+    ? await EmailSyncRepo.findById(job.user_id, job.email_sync_account_id)
+    : await EmailSyncRepo.findConnected(job.user_id, job.provider);
+
+  if (!account || account.status !== 'connected') {
     await EmailSyncRepo.markJobFailed(
       job.id,
       `No connected ${job.provider} account found. Reconnect it in the app.`
@@ -406,7 +488,6 @@ export async function processSyncJob(job) {
     await EmailSyncRepo.markJobCompleted(job.id, {
       scanned: result.scanned,
       processed: result.processed,
-      couponsInserted: result.couponsInserted,
       programsUpdated: result.programsAdded + result.programsUpdated,
     });
     return result;
@@ -463,9 +544,35 @@ export const gmailService = {
     const { tokens } = await oAuth2Client.getToken(code);
     oAuth2Client.setCredentials(tokens);
 
-    const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
-    const profile = await gmail.users.getProfile({ userId: 'me' });
-    const email = profile.data.emailAddress;
+    // Fetch user email via OAuth2 userinfo
+    let email = null;
+    try {
+      const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
+      const userinfo = await oauth2.userinfo.get();
+      email = userinfo.data?.email;
+    } catch {
+      // Fallback if userinfo is unavailable
+    }
+
+    let historyId = null;
+    try {
+      const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
+      const profile = await gmail.users.getProfile({ userId: 'me' });
+      if (!email) email = profile.data?.emailAddress;
+      historyId = profile.data?.historyId || null;
+    } catch (err) {
+      console.warn('Gmail getProfile note:', err.message);
+      if (!email) {
+        throw new Error(
+          'Insufficient Permission: Make sure "Gmail API" is enabled in Google Cloud Console and that the Gmail read-only checkbox was allowed during sign-in.'
+        );
+      }
+    }
+
+    if (!email) {
+      throw new Error('Could not determine Google account email.');
+    }
+
     const accessEnc = encryptToken(tokens.access_token);
     const refreshEnc = encryptToken(tokens.refresh_token || '');
 
@@ -475,7 +582,7 @@ export const gmailService = {
       tokens,
       accessEnc,
       refreshEnc,
-      historyId: profile.data.historyId || null,
+      historyId,
     });
 
     return email;
@@ -487,8 +594,8 @@ export const gmailService = {
    * `wait=true` is for scripts/tests: it then waits on the job row instead.
    */
   async scan(userId, provider, wait) {
-    const account = await EmailSyncRepo.findConnected(userId, provider);
-    if (!account) {
+    const accounts = await EmailSyncRepo.findAllConnected(userId, provider);
+    if (accounts.length === 0) {
       return {
         status: 400,
         body: {
@@ -497,47 +604,55 @@ export const gmailService = {
       };
     }
 
-    const job = await EmailSyncRepo.createJob(userId, provider);
-    // A worker claims this. Nudging the bus only removes the poll latency.
+    // One job per mailbox so every connected inbox is scanned, not just the
+    // first. They run sequentially in the worker via SKIP LOCKED claiming.
+    const jobs = [];
+    for (const account of accounts) {
+      jobs.push(await EmailSyncRepo.createJob(userId, provider, account.id));
+    }
+    // A worker claims these. Nudging the bus only removes the poll latency.
     notifyJobQueued();
 
     if (!wait) {
       return {
         status: 202,
         body: {
-          jobId: job.id,
+          jobId: jobs[0].id,
+          jobIds: jobs.map((j) => j.id),
+          accountsScanning: accounts.length,
           status: 'queued',
-          message: 'Scan started. Poll GET /api/email-sync/jobs/:id for progress.',
+          message: `Scan started for ${accounts.length} mailbox(es). Poll GET /api/email-sync/jobs/:id for progress.`,
         },
       };
     }
 
-    let finished;
-    try {
-      finished = await waitForJob(job.id, userId);
-    } catch (err) {
-      return {
-        status: err.statusCode || 500,
-        body: { error: err.message, jobId: job.id },
-      };
+    // Wait for every queued job, not just the first.
+    const finished = [];
+    for (const job of jobs) {
+      try {
+        finished.push(await waitForJob(job.id, userId));
+      } catch (err) {
+        return {
+          status: err.statusCode || 500,
+          body: { error: err.message, jobId: job.id },
+        };
+      }
     }
 
-    const [linked, coupons] = await Promise.all([
-      EmailSyncRepo.linkedAccountsWithPrograms(userId),
-      EmailSyncRepo.recentCoupons(userId, 50),
-    ]);
+    const linked = await EmailSyncRepo.linkedAccountsWithPrograms(userId);
+    const sum = (key) => finished.reduce((acc, j) => acc + (Number(j[key]) || 0), 0);
 
     return {
       status: 200,
       body: {
-        jobId: job.id,
-        status: finished.status,
-        scanned: finished.total_messages_found,
-        processed: finished.messages_processed,
-        programsUpdated: finished.programs_updated,
-        couponsExtracted: finished.coupons_extracted,
+        jobId: jobs[0].id,
+        jobIds: jobs.map((j) => j.id),
+        status: finished.every((j) => j.status === 'completed') ? 'completed' : 'partial',
+        accountsScanning: accounts.length,
+        scanned: sum('total_messages_found'),
+        processed: sum('messages_processed'),
+        programsUpdated: sum('programs_updated'),
         accounts: linked,
-        coupons,
       },
     };
   },
@@ -550,8 +665,31 @@ export const gmailService = {
     return EmailSyncRepo.listForUser(userId);
   },
 
-  disconnect(userId, provider) {
-    return EmailSyncRepo.disconnect(userId, provider);
+  /**
+   * Disconnect one mailbox. `accountId` identifies exactly which row to remove —
+   * a user may have several connected, so provider alone is not enough.
+   */
+  async disconnect(userId, accountId) {
+    if (!accountId) {
+      return {
+        status: 400,
+        body: { error: 'An accountId is required to disconnect a mailbox.' },
+      };
+    }
+
+    const account = await EmailSyncRepo.findById(userId, accountId);
+    if (!account) {
+      return {
+        status: 404,
+        body: { error: 'No such connected mailbox.' },
+      };
+    }
+
+    await EmailSyncRepo.disconnect(userId, accountId);
+    return {
+      status: 200,
+      body: { message: 'Disconnected successfully', email: account.email_address },
+    };
   },
 
   /** Enable Gmail watch push notifications for the connected account. */

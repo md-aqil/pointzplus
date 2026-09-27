@@ -1,118 +1,58 @@
-// app/(tabs)/deals.tsx – Deals & Extracted Coupons
-import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+// app/(tabs)/deals.tsx – Deals & Offers (Coming Soon placeholder)
+//
+// The coupon wallet was removed outright: the extractor persisted bank account
+// numbers and shipment tracking IDs as "coupon codes", so the feature was
+// withdrawn rather than patched. Deals may return with a stricter extractor.
+import React from "react";
+import { View, Text, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
-import { Sparkles, ArrowRight } from "lucide-react-native";
+import { Sparkles, Clock3 } from "lucide-react-native";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
-import { Button } from "../../components/ui/Button";
-import { usePoints } from "../../hooks/usePoints";
-import { CouponCard } from "../../components/cards/CouponCard";
 
 export default function DealsScreen() {
-  const { activeCoupons, expiringCoupons, refreshAll, isSyncing } = usePoints();
-  const [loadingLocal, setLoadingLocal] = useState(false);
-
-  const onRefresh = async () => {
-    setLoadingLocal(true);
-    try {
-      await refreshAll();
-    } finally {
-      setLoadingLocal(false);
-    }
-  };
-
-  useEffect(() => {
-    // ensure coupons are fetched when entering tab
-    refreshAll().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const hasAny = activeCoupons.length > 0 || expiringCoupons.length > 0;
-
   return (
-    <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">
-      <ScreenHeader title="Deals" showBack={false} />
+    <SafeAreaView edges={["top"]} className="flex-1 bg-[#F8FAFC]">
+      <ScreenHeader title="Deals & Offers" showBack={false} />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 100 }}
-        className="px-5 pt-2"
+        contentContainerStyle={{ paddingBottom: 120, flexGrow: 1 }}
+        className="px-5 pt-3"
       >
-        <LinearGradient
-          colors={["#070617", "#1A1836"]}
-          className="w-full rounded-3xl p-6 border border-dark-surface mb-5 shadow-lg"
-        >
-          <View className="flex-row items-center justify-between mb-3">
-            <View className="bg-primary/20 px-3 py-1 rounded-full border border-primary/40">
-              <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-[10px] text-primary">
-                YOUR EXTRACTED COUPONS
-              </Text>
-            </View>
-            <Sparkles size={18} color="#02EFF4" />
+        <View className="flex-1 items-center justify-center py-16">
+          {/* Icon */}
+          <View className="w-20 h-20 rounded-3xl bg-[#EBF7FC] items-center justify-center mb-5 border border-[#D8F1FD]">
+            <Sparkles size={34} color="#00A3FF" strokeWidth={1.8} />
           </View>
 
-          <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-xl text-white mb-2 leading-tight">
-            Copy codes instantly & redeem before expiry
-          </Text>
-
-          <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-muted mb-4 leading-relaxed">
-            PointzPlus automatically extracts promo codes from your Gmail statements.
-          </Text>
-
-          <Button
-            title={loadingLocal ? "Refreshing..." : "Refresh"}
-            onPress={onRefresh}
-            variant="primary"
-            size="md"
-            rightIcon={<ArrowRight size={16} color="#070617" />}
-            disabled={isSyncing || loadingLocal}
-          />
-        </LinearGradient>
-
-        {!hasAny ? (
-          <View className="bg-white p-8 rounded-3xl border border-border-light items-center justify-center my-6">
-            <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-sm text-dark mb-1">
-              No coupons found yet
-            </Text>
-            <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-dark-muted text-center">
-              Connect Gmail and run sync to extract discount codes and vouchers.
+          {/* Badge */}
+          <View className="bg-[#EBF7FC] px-3.5 py-1.5 rounded-full border border-[#D8F1FD] flex-row items-center mb-4">
+            <Clock3 size={12} color="#01A2FB" strokeWidth={2.2} />
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+              className="text-[11.5px] text-[#01A2FB] ml-1.5"
+            >
+              COMING SOON
             </Text>
           </View>
-        ) : (
-          <>
-            {expiringCoupons.length > 0 && (
-              <View className="mb-6">
-                <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-xs text-dark-muted uppercase tracking-wider mb-3 ml-1">
-                  Expiring soon (next 14 days)
-                </Text>
-                {expiringCoupons.map((c) => (
-                  <CouponCard key={c.id} coupon={c} />
-                ))}
-              </View>
-            )}
 
-            {activeCoupons.length > 0 && (
-              <View className="mb-6">
-                <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-xs text-dark-muted uppercase tracking-wider mb-3 ml-1">
-                  All valid coupons
-                </Text>
-                {activeCoupons.map((c) => (
-                  <CouponCard key={c.id} coupon={c} />
-                ))}
-              </View>
-            )}
-          </>
-        )}
+          <Text
+            style={{ fontFamily: "PlusJakartaSans-Bold" }}
+            className="text-[20px] text-[#070617] text-center mb-2"
+          >
+            Deals are on the way
+          </Text>
 
-        {isSyncing && (
-          <View className="py-6 items-center">
-            <ActivityIndicator size="small" color="#01A2FB" />
-          </View>
-        )}
-
-        <View className="pb-20" />
+          <Text
+            style={{ fontFamily: "PlusJakartaSans-Regular" }}
+            className="text-[13px] text-[#6A6A74] text-center leading-relaxed px-6"
+          >
+            PointzPlus is currently a points tracker. Partner offers and discounts
+            are being rebuilt so only genuine promo codes are ever shown.
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
+

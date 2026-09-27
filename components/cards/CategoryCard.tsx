@@ -1,7 +1,21 @@
-// components/cards/CategoryCard.tsx – Works with CategorySummary from pointsStore
+// components/cards/CategoryCard.tsx – Matches Penpot All Category design
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import * as Haptics from "expo-haptics";
+import {
+  CreditCard,
+  Plane,
+  ShoppingBag,
+  Building2,
+  Utensils,
+  Fuel,
+  Sparkles,
+  ShoppingBasket,
+  Gift,
+  Tv,
+  Car,
+  Heart,
+} from "lucide-react-native";
 import { CategorySummary } from "../../types/loyalty";
 
 interface CategoryCardProps {
@@ -10,9 +24,38 @@ interface CategoryCardProps {
   onPress?: () => void;
 }
 
+const getCategoryIcon = (categoryId: string) => {
+  switch (categoryId) {
+    case "banking":
+      return <CreditCard size={17} color="#01A2FB" />;
+    case "airlines":
+      return <Plane size={17} color="#01A2FB" />;
+    case "shopping":
+      return <ShoppingBag size={17} color="#01A2FB" />;
+    case "hotels":
+      return <Building2 size={17} color="#01A2FB" />;
+    case "dining":
+      return <Utensils size={17} color="#01A2FB" />;
+    case "fuel":
+      return <Fuel size={17} color="#01A2FB" />;
+    case "groceries":
+    case "supermarket":
+      return <ShoppingBasket size={17} color="#01A2FB" />;
+    case "entertainment":
+      return <Tv size={17} color="#01A2FB" />;
+    case "travel":
+      return <Car size={17} color="#01A2FB" />;
+    case "health":
+    case "wellness":
+      return <Heart size={17} color="#01A2FB" />;
+    default:
+      return <Sparkles size={17} color="#01A2FB" />;
+  }
+};
+
 export const CategoryCard: React.FC<CategoryCardProps> = ({
   category,
-  variant = "compact",
+  variant = "full",
   onPress,
 }) => {
   const handlePress = () => {
@@ -28,25 +71,25 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({
         className="mr-3 mb-2"
       >
         <View
-          style={{ backgroundColor: category.bgColor, borderColor: category.accentColor }}
+          style={{ backgroundColor: "#F5FEFF", borderColor: "#E6F6FF" }}
           className="px-4 py-3 rounded-xl border shadow-sm"
         >
           <Text
-            style={{ fontFamily: "PlusJakartaSans-Bold", color: category.accentColor }}
-            className="text-xs mb-1"
+            style={{ fontFamily: "PlusJakartaSans-Bold" }}
+            className="text-xs text-[#070617] mb-1"
           >
             {category.categoryName}
           </Text>
           <View className="flex-row items-baseline">
             <Text
-              style={{ fontFamily: "PlusJakartaSans-Bold", color: category.accentColor }}
-              className="text-base"
+              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+              className="text-base text-[#070617]"
             >
               {category.totalPoints.toLocaleString()}
             </Text>
             <Text
-              style={{ fontFamily: "PlusJakartaSans-Medium", color: category.accentColor }}
-              className="text-[10px] ml-1 opacity-70"
+              style={{ fontFamily: "PlusJakartaSans-Medium" }}
+              className="text-[10px] ml-1 text-[#6A6A74]"
             >
               pts
             </Text>
@@ -64,67 +107,56 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({
     );
   }
 
-  // Full variant for list view
+  // Full variant matching Penpot Frame 2087327267
   return (
     <TouchableOpacity
       onPress={handlePress}
       activeOpacity={0.85}
-      className="w-full bg-white rounded-2xl p-4 border border-border-light mb-3 shadow-sm"
+      style={{
+        borderRadius: 8,
+        backgroundColor: "#F5FEFF",
+        borderColor: "#E6F6FF",
+        shadowColor: "#01A7FB",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.06,
+        shadowRadius: 12,
+        elevation: 2,
+      }}
+      className="w-full border p-3.5 mb-3 flex-row items-center justify-between"
     >
-      <View className="flex-row items-center justify-between">
-        <View className="flex-row items-center flex-1 mr-2">
-          <View
-            style={{ backgroundColor: category.bgColor }}
-            className="w-12 h-12 rounded-xl items-center justify-center mr-3 border"
-          >
-            <View
-              style={{ backgroundColor: category.accentColor }}
-              className="w-5 h-5 rounded-full"
-            />
-          </View>
-
-          <View className="flex-1">
-            <Text
-              style={{ fontFamily: "PlusJakartaSans-Bold" }}
-              className="text-sm text-dark"
-            >
-              {category.categoryName}
-            </Text>
-            <Text
-              style={{ fontFamily: "PlusJakartaSans-Regular" }}
-              className="text-xs text-dark-muted"
-            >
-              {category.brandCount} {category.brandCount === 1 ? "brand" : "brands"}
-            </Text>
-          </View>
+      <View className="flex-row items-center flex-1 mr-3">
+        {/* Soft cyan square icon badge */}
+        <View className="w-8 h-8 rounded-xl bg-[#E6F6FF] items-center justify-center mr-3">
+          {getCategoryIcon(category.categoryId)}
         </View>
 
-        <View className="items-end">
+        <View className="flex-1">
           <Text
-            style={{ fontFamily: "PlusJakartaSans-Bold" }}
-            className="text-lg text-dark"
+            style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
+            className="text-[13px] text-[#070617] leading-tight mb-0.5"
+            numberOfLines={1}
           >
-            {category.totalPoints.toLocaleString()}
+            {category.categoryName}
           </Text>
           <Text
-            style={{ fontFamily: "PlusJakartaSans-Medium" }}
-            className="text-[10px] text-primary-dark"
+            style={{ fontFamily: "PlusJakartaSans-Regular" }}
+            className="text-[11px] text-[#393845]"
+            numberOfLines={1}
           >
-            pts
+            {category.expiringPoints > 0
+              ? `${category.expiringPoints.toLocaleString()} pts expiring soon`
+              : `${category.brandCount} ${category.brandCount === 1 ? "program" : "programs"} tracked`}
           </Text>
         </View>
       </View>
 
-      {category.expiringPoints > 0 && (
-        <View className="mt-2.5 pt-2.5 border-t border-border-light/60">
-          <Text
-            style={{ fontFamily: "PlusJakartaSans-Medium" }}
-            className="text-xs text-alert"
-          >
-            {category.expiringPoints.toLocaleString()} points expiring soon
-          </Text>
-        </View>
-      )}
+      <Text
+        style={{ fontFamily: "PlusJakartaSans-Bold" }}
+        className="text-[16px] text-[#070617] text-right"
+      >
+        {category.totalPoints.toLocaleString()}
+      </Text>
     </TouchableOpacity>
   );
 };
+

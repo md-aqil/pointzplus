@@ -80,31 +80,26 @@ export const Button: React.FC<ButtonProps> = ({
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         disabled={disabled || loading}
-        activeOpacity={0.9}
+        activeOpacity={0.88}
         style={[animatedStyle]}
-        className={`w-full overflow-hidden rounded-2xl ${disabled ? "opacity-50" : ""} ${className}`}
+        className={`w-full overflow-hidden rounded-2xl bg-[#00A3FF] items-center justify-center ${sizeClasses[size]} ${
+          disabled ? "opacity-50" : ""
+        } ${className}`}
       >
-        <LinearGradient
-          colors={["#02EFF4", "#01A2FB"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          className={`flex-row items-center justify-center ${sizeClasses[size]}`}
-        >
-          {loading ? (
-            <ActivityIndicator color="#070617" size="small" />
-          ) : (
-            <View className="flex-row items-center justify-center space-x-2">
-              {leftIcon && <View className="mr-2">{leftIcon}</View>}
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className={`text-dark text-center ${textSizeClasses[size]}`}
-              >
-                {title}
-              </Text>
-              {rightIcon && <View className="ml-2">{rightIcon}</View>}
-            </View>
-          )}
-        </LinearGradient>
+        {loading ? (
+          <ActivityIndicator color="#FFFFFF" size="small" />
+        ) : (
+          <View className="flex-row items-center justify-center space-x-2">
+            {leftIcon && <View className="mr-2">{leftIcon}</View>}
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+              className={`text-white text-center font-bold tracking-tight ${textSizeClasses[size]}`}
+            >
+              {title}
+            </Text>
+            {rightIcon && <View className="ml-2">{rightIcon}</View>}
+          </View>
+        )}
       </AnimatedTouchableOpacity>
     );
   }
@@ -113,38 +108,38 @@ export const Button: React.FC<ButtonProps> = ({
     switch (variant) {
       case "dark":
         return {
-          container: "bg-dark",
+          container: "bg-[#070617]",
           text: "text-white font-bold",
           loader: "#FFFFFF",
         };
       case "secondary":
         return {
-          container: "bg-ice-dark border border-border-blue",
-          text: "text-dark font-semibold",
+          container: "bg-[#E6F6FF] border border-[#BCE3FF]",
+          text: "text-[#070617] font-semibold",
           loader: "#070617",
         };
       case "alert":
         return {
-          container: "bg-alert",
+          container: "bg-[#FF4343]",
           text: "text-white font-bold",
           loader: "#FFFFFF",
         };
       case "outline":
         return {
-          container: "bg-white border border-border-light",
-          text: "text-dark font-semibold",
+          container: "bg-white border border-[#E6E6E8]",
+          text: "text-[#070617] font-semibold",
           loader: "#070617",
         };
       case "ghost":
         return {
           container: "bg-transparent",
-          text: "text-dark font-semibold",
+          text: "text-[#070617] font-semibold",
           loader: "#070617",
         };
       default:
         return {
-          container: "bg-white border border-border-light",
-          text: "text-dark font-semibold",
+          container: "bg-white border border-[#E6E6E8]",
+          text: "text-[#070617] font-semibold",
           loader: "#070617",
         };
     }
@@ -160,7 +155,7 @@ export const Button: React.FC<ButtonProps> = ({
       disabled={disabled || loading}
       activeOpacity={0.85}
       style={[animatedStyle]}
-      className={`flex-row items-center justify-center ${vStyle.container} ${sizeClasses[size]} ${
+      className={`w-full flex-row items-center justify-center rounded-2xl ${vStyle.container} ${sizeClasses[size]} ${
         disabled ? "opacity-50" : ""
       } ${className}`}
     >
@@ -170,7 +165,7 @@ export const Button: React.FC<ButtonProps> = ({
         <View className="flex-row items-center justify-center">
           {leftIcon && <View className="mr-2">{leftIcon}</View>}
           <Text
-            style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
+            style={{ fontFamily: "PlusJakartaSans-Bold" }}
             className={`text-center ${vStyle.text} ${textSizeClasses[size]}`}
           >
             {title}

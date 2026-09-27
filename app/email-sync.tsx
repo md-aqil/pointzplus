@@ -27,18 +27,22 @@ import { usePoints } from "../hooks/usePoints";
 import { usePointsStore } from "../store/pointsStore";
 import { useAuth } from "../hooks/useAuth";
 import { apiClient } from "../lib/apiClient";
+import { MailboxCard } from "../components/ui/MailboxCard";
 
 export default function EmailSyncScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { emailAccounts, syncEmail, isSyncing, syncProgress, expiringCoupons } = usePoints();
+  const { emailAccounts, syncEmail, isSyncing, syncProgress, disconnectEmail } = usePoints();
   const fetchAccountsFromBackend = usePointsStore((s) => s.fetchAccountsFromBackend);
   const [syncSuccessModal, setSyncSuccessModal] = useState(false);
   const [syncedCount, setSyncedCount] = useState(0);
-  const [couponCount, setCouponCount] = useState(0);
   const [isConnecting, setIsConnecting] = useState(false);
 
-  const gmailAccount = emailAccounts.find((e) => e.provider === "gmail" && e.status === "connected");
+  // A user may link several mailboxes, so the UI works with a list.
+  const gmailAccounts = emailAccounts.filter(
+    (e) => e.provider === "gmail" && e.status === "connected"
+  );
+  const gmailAccount = gmailAccounts[0] ?? null;
 
   // Refresh connected accounts on mount and when app returns to foreground
   useEffect(() => {
@@ -80,9 +84,6 @@ export default function EmailSyncScreen() {
     try {
       const results = await syncEmail("gmail", email);
       setSyncedCount(results.length);
-      setCouponCount(
-        usePointsStore.getState().coupons.filter((c) => !c.isUsed).length
-      );
       setSyncSuccessModal(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
@@ -100,7 +101,11 @@ export default function EmailSyncScreen() {
         <TouchableOpacity
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.back();
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace("/(tabs)/home");
+            }
           }}
           className="w-10 h-10 rounded-full bg-light-bg items-center justify-center"
         >
@@ -199,13 +204,43 @@ export default function EmailSyncScreen() {
           </View>
         )}
 
-        {/* Gmail Connection Card */}
+        {/* Connected Mailboxes — a user may link several (personal + work). */}
         <Text
           style={{ fontFamily: "PlusJakartaSans-Bold" }}
           className="text-sm text-dark uppercase tracking-wider mb-3 ml-1"
         >
-          Gmail Mailbox
+          Mailboxes
+          {gmailAccounts.length > 0 ? ` (${gmailAccounts.length})` : ""}
         </Text>
+
+        {gmailAccounts.map((account) => (
+          <MailboxCard
+            key={account.id}
+            email={account.email}
+            programsFound={account.programsFound}
+            lastSyncAt={account.lastSyncAt}
+            busy={isSyncing || isConnecting}
+            onScan={() => handleStartSync(account.email)}
+            onRemove={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              Alert.alert(
+                "Disconnect mailbox?",
+                `${account.email} will be removed. Points already tracked are kept.`,
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Disconnect",
+                    style: "destructive",
+                    onPress: () => {
+                      disconnectEmail(account.id);
+                      fetchAccountsFromBackend();
+                    },
+                  },
+                ]
+              );
+            }}
+          />
+        ))}
 
         <View className="bg-white rounded-2xl p-5 mb-5 border border-border-light shadow-sm">
           <View className="flex-row items-center justify-between mb-4">
@@ -218,28 +253,20 @@ export default function EmailSyncScreen() {
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
                   className="text-base text-dark"
                 >
-                  Google Gmail
+                  {gmailAccounts.length > 0 ? "Add another mailbox" : "Google Gmail"}
                 </Text>
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Regular" }}
                   className="text-xs text-dark-muted"
                 >
-                  {gmailAccount ? gmailAccount.email : "Connect your primary Gmail inbox"}
+                  {gmailAccounts.length > 0
+                    ? "Link a second inbox (e.g. work)"
+                    : "Connect your primary Gmail inbox"}
                 </Text>
               </View>
             </View>
 
-            {gmailAccount ? (
-              <View className="bg-emerald-50 px-2.5 py-1 rounded-full flex-row items-center border border-emerald-200">
-                <CheckCircle2 size={12} color="#059669" className="mr-1" />
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-[10px] text-emerald-700 ml-1"
-                >
-                  Connected
-                </Text>
-              </View>
-            ) : (
+            {gmailAccounts.length === 0 && (
               <View className="bg-gray-100 px-2.5 py-1 rounded-full">
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Medium" }}
@@ -251,44 +278,24 @@ export default function EmailSyncScreen() {
             )}
           </View>
 
-          {gmailAccount && (
-            <View className="bg-light-bg p-3.5 rounded-xl mb-4 flex-row items-center justify-between">
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Medium" }}
-                className="text-xs text-dark-muted"
-              >
-                Extracted Programs
-              </Text>
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-xs text-dark"
-              >
-                {gmailAccount.programsFound} Active Programs
-              </Text>
-            </View>
-          )}
-
           <TouchableOpacity
             onPress={() => {
-              if (gmailAccount) {
-                handleStartSync(gmailAccount.email);
-              } else {
-                handleConnectGmail();
-              }
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              handleConnectGmail();
             }}
             disabled={isSyncing || isConnecting}
-            className="w-full bg-primary-dark py-3.5 rounded-xl items-center flex-row justify-center shadow-sm"
+            className="w-full bg-[#00A3FF] py-3.5 rounded-2xl items-center flex-row justify-center shadow-sm"
           >
             {isSyncing || isConnecting ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
               <>
-                <RefreshCw size={16} color="#FFFFFF" className="mr-2" />
+                <Mail size={16} color="#FFFFFF" className="mr-2" />
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-white text-sm ml-2"
+                  className="text-white text-sm font-bold"
                 >
-                  {gmailAccount ? "Rescan Gmail Statements Now" : "Connect Google Account"}
+                  {gmailAccounts.length > 0 ? "Connect Another Account" : "Connect Google Account"}
                 </Text>
               </>
             )}
@@ -339,7 +346,6 @@ export default function EmailSyncScreen() {
               className="text-xs text-dark-muted text-center mb-5"
             >
               Successfully scanned your Gmail statements and updated {syncedCount} loyalty programs.
-              Extracted {couponCount} coupon tokens for quick redemption.
             </Text>
 
             <TouchableOpacity
@@ -347,11 +353,11 @@ export default function EmailSyncScreen() {
                 setSyncSuccessModal(false);
                 router.replace("/(tabs)/home");
               }}
-              className="w-full bg-primary-dark py-3.5 rounded-2xl items-center shadow-sm"
+              className="w-full bg-[#00A3FF] py-3.5 rounded-2xl items-center shadow-sm"
             >
               <Text
                 style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-white text-sm"
+                className="text-white text-sm font-bold"
               >
                 View Updated Dashboard
               </Text>

@@ -1,4 +1,4 @@
-// app/settings/delete-account.tsx – Delete Account survey and confirmation matching Penpot Design
+// app/settings/delete-account.tsx – Delete Account screen matching Penpot Design
 import React, { useState } from "react";
 import {
   View,
@@ -7,14 +7,15 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  AlertTriangle,
-  CheckSquare,
-  Square,
   Trash2,
+  Check,
+  AlertCircle,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
@@ -23,6 +24,8 @@ import { useAuth } from "../../hooks/useAuth";
 import { apiClient } from "../../lib/apiClient";
 
 const REASONS = [
+  "I no longer use the app",
+  "I couldn't find the value I expected",
   "Missing programs or features I need",
   "Too many emails or notifications",
   "Privacy or security concerns",
@@ -33,16 +36,25 @@ export default function DeleteAccountScreen() {
   const router = useRouter();
   const { signOut } = useAuth();
 
-  const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const toggleReason = (reason: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedReasons((prev) =>
+      prev.includes(reason)
+        ? prev.filter((r) => r !== reason)
+        : [...prev, reason]
+    );
+  };
 
   const handleDelete = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
 
     Alert.alert(
       "Permanent Deletion",
-      "Are you absolutely sure? All your linked programs and point tracking data will be permanently wiped.",
+      "Are you absolutely sure you want to delete your account? All your linked loyalty accounts, tracked points, and history will be permanently wiped.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -55,8 +67,8 @@ export default function DeleteAccountScreen() {
             } catch (err) {
               setLoading(false);
               Alert.alert(
-                "Deletion failed",
-                "We couldn't delete your account. Please try again or contact support."
+                "Deletion Failed",
+                "We couldn't delete your account right now. Please check your connection and try again."
               );
               return;
             }
@@ -69,125 +81,190 @@ export default function DeleteAccountScreen() {
     );
   };
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)/profile");
+    }
+  };
+
   return (
-    <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">
+    <SafeAreaView edges={["top"]} className="flex-1 bg-[#F8FAFC]">
       <ScreenHeader
         title="Delete Account"
-        onBack={() => router.back()}
+        onBack={handleBack}
       />
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 60 }}
-        className="px-5 pt-2"
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        className="flex-1"
       >
-        {/* Warning Banner matching Penpot */}
-        <View className="bg-alert-bg border border-alert/30 p-5 rounded-3xl mb-6">
-          <View className="flex-row items-center mb-2">
-            <AlertTriangle size={20} color="#FF4343" className="mr-2" />
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 120 }}
+          className="px-5 pt-4"
+        >
+          {/* Warning Hero Card */}
+          <View className="bg-[#FFF1F2] border border-[#FFE4E6] rounded-3xl p-5 mb-5">
+            <View className="flex-row items-center mb-3">
+              <View className="w-10 h-10 rounded-2xl bg-[#FFE4E6] items-center justify-center mr-3">
+                <Trash2 size={20} color="#E11D48" />
+              </View>
+              <View className="flex-1">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-[16px] text-[#881337] leading-tight"
+                >
+                  Are you sure you want to delete your account?
+                </Text>
+              </View>
+            </View>
             <Text
-              style={{ fontFamily: "PlusJakartaSans-Bold" }}
-              className="text-sm text-alert ml-1.5"
+              style={{ fontFamily: "PlusJakartaSans-Regular" }}
+              className="text-[13px] text-[#9F1239] leading-relaxed"
             >
-              Are you sure you want to delete your account?
+              This action is permanent and cannot be undone. You will lose access to all your tracked loyalty programs, points balance, and expiry alerts.
             </Text>
           </View>
-          <Text
-            style={{ fontFamily: "PlusJakartaSans-Regular" }}
-            className="text-xs text-alert leading-relaxed"
-          >
-            This action is permanent and cannot be undone. You will lose access
-            to all your points data, program links, and alert history.
-          </Text>
-        </View>
 
-        {/* Survey Reasons from Penpot */}
-        <Text
-          style={{ fontFamily: "PlusJakartaSans-Bold" }}
-          className="text-xs text-dark-muted uppercase tracking-wider mb-3 ml-1"
-        >
-          Why are you leaving?
-        </Text>
+          {/* Survey Card Container */}
+          <View className="bg-white rounded-3xl border border-[#E2E8F0] shadow-sm p-5 mb-6">
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+              className="text-[15px] text-[#070617] mb-1"
+            >
+              Help us understand why you're leaving
+            </Text>
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Regular" }}
+              className="text-[13px] text-[#6A6A74] mb-4"
+            >
+              Your feedback helps us improve PointzPlus for everyone.
+            </Text>
 
-        <View className="bg-white rounded-3xl border border-border-light shadow-sm p-4 mb-5 space-y-3">
-          {REASONS.map((reason) => {
-            const isSelected = selectedReason === reason;
-            return (
-              <TouchableOpacity
-                key={reason}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setSelectedReason(reason);
-                }}
-                activeOpacity={0.8}
-                className="flex-row items-center py-2 space-x-3"
+            {/* Checkbox Options */}
+            <View className="space-y-3">
+              {REASONS.map((reason) => {
+                const isSelected = selectedReasons.includes(reason);
+                return (
+                  <TouchableOpacity
+                    key={reason}
+                    onPress={() => toggleReason(reason)}
+                    activeOpacity={0.7}
+                    className={`flex-row items-center p-3.5 rounded-2xl border ${
+                      isSelected
+                        ? "bg-[#FFF5F5] border-[#FF4343]/40"
+                        : "bg-[#FAFAFA] border-[#F0F1F5]"
+                    }`}
+                  >
+                    <View
+                      className={`w-5 h-5 rounded-md items-center justify-center mr-3 border ${
+                        isSelected
+                          ? "bg-[#FF4343] border-[#FF4343]"
+                          : "bg-white border-[#D1D5DB]"
+                      }`}
+                    >
+                      {isSelected && <Check size={14} color="#FFFFFF" strokeWidth={3} />}
+                    </View>
+                    <Text
+                      style={{
+                        fontFamily: isSelected
+                          ? "PlusJakartaSans-SemiBold"
+                          : "PlusJakartaSans-Medium",
+                      }}
+                      className={`text-[13.5px] flex-1 ${
+                        isSelected ? "text-[#070617]" : "text-[#393845]"
+                      }`}
+                    >
+                      {reason}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Additional Feedback */}
+            <View className="mt-5">
+              <Text
+                style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
+                className="text-[13px] text-[#070617] mb-2"
               >
-                {isSelected ? (
-                  <CheckSquare size={20} color="#FF4343" />
-                ) : (
-                  <Square size={20} color="#9C9BA2" />
-                )}
+                Tell us more (optional)
+              </Text>
+              <TextInput
+                style={{
+                  fontFamily: "PlusJakartaSans-Regular",
+                  fontSize: 13.5,
+                  color: "#070617",
+                  minHeight: 90,
+                  textAlignVertical: "top",
+                }}
+                className="bg-[#FAFAFA] border border-[#E2E8F0] rounded-2xl p-3.5"
+                placeholder="Share any additional feedback..."
+                placeholderTextColor="#9C9BA2"
+                value={feedback}
+                onChangeText={setFeedback}
+                multiline
+              />
+            </View>
+          </View>
+
+          {/* Action Buttons */}
+          <View className="mb-6 space-y-3">
+            <TouchableOpacity
+              onPress={handleDelete}
+              disabled={loading}
+              activeOpacity={0.85}
+              style={{
+                borderRadius: 8,
+                backgroundColor: "#FF4343",
+                shadowColor: "#01A2FB",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.16,
+                shadowRadius: 12,
+                elevation: 4,
+              }}
+              className="w-full flex-row items-center justify-center py-3.5 px-6"
+            >
+              {loading ? (
                 <Text
-                  style={{
-                    fontFamily: isSelected
-                      ? "PlusJakartaSans-SemiBold"
-                      : "PlusJakartaSans-Regular",
-                  }}
-                  className={`text-xs ml-2 flex-1 ${
-                    isSelected ? "text-dark" : "text-dark-muted"
-                  }`}
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-white text-[15px]"
                 >
-                  {reason}
+                  Deleting...
                 </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+              ) : (
+                <View className="flex-row items-center justify-center" style={{ gap: 10 }}>
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-white text-[15px] font-bold text-center"
+                  >
+                    Delete Account
+                  </Text>
+                  <Trash2 size={18} color="#FFFFFF" />
+                </View>
+              )}
+            </TouchableOpacity>
 
-        {/* Optional Feedback Input */}
-        <Text
-          style={{ fontFamily: "PlusJakartaSans-Bold" }}
-          className="text-xs text-dark-muted uppercase tracking-wider mb-3 ml-1"
-        >
-          Tell us more (optional)
-        </Text>
-
-        <View className="bg-white rounded-3xl border border-border-light shadow-sm p-4 mb-6">
-          <TextInput
-            style={{
-              fontFamily: "PlusJakartaSans-Regular",
-              fontSize: 13,
-              color: "#070617",
-              minHeight: 80,
-              textAlignVertical: "top",
-            }}
-            placeholder="Share any additional feedback..."
-            placeholderTextColor="#9C9BA2"
-            value={feedback}
-            onChangeText={setFeedback}
-            multiline
-          />
-        </View>
-
-        {/* Actions */}
-        <Button
-          title="Delete Account"
-          onPress={handleDelete}
-          loading={loading}
-          variant="alert"
-          size="lg"
-          leftIcon={<Trash2 size={18} color="#FFFFFF" />}
-        />
-
-        <View className="mt-3">
-          <Button
-            title="Cancel"
-            onPress={() => router.back()}
-            variant="outline"
-            size="md"
-          />
-        </View>
-      </ScrollView>
+            <TouchableOpacity
+              onPress={handleBack}
+              activeOpacity={0.8}
+              style={{ borderRadius: 8 }}
+              className="w-full py-3.5 bg-white border border-[#E2E8F0] items-center justify-center"
+            >
+              <Text
+                style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
+                className="text-[15px] text-[#070617]"
+              >
+                Keep My Account
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
+
+

@@ -31,13 +31,47 @@ function connectedPage(email) {
         <div class="card">
           <div style="font-size: 48px;">✅</div>
           <h2>Gmail Connected!</h2>
-          <p>Your Gmail account (${email}) has been securely linked. Return to PointzPlus to scan your points & coupons.</p>
+          <p>Your Gmail account (${email}) has been securely linked. Return to PointzPlus to scan your points.</p>
           <a href="${WEB_RETURN_URL}" class="btn">Return to PointzPlus</a>
         </div>
         <script>
           window.location.href = "${APP_DEEP_LINK}";
           setTimeout(() => { window.location.href = "${WEB_RETURN_URL}"; }, 1500);
         </script>
+      </body>
+    </html>
+  `;
+}
+
+function errorPage(message) {
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Google Connection - PointzPlus</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #FFF6F6; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+          .card { background: white; padding: 32px; border-radius: 24px; box-shadow: 0 10px 30px rgba(255, 67, 67, 0.1); text-align: center; max-width: 400px; width: 100%; border: 1px solid #FFE0E0; }
+          h2 { color: #070617; margin: 16px 0 8px; font-size: 20px; }
+          p { color: #6A6A74; font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
+          .tip { background: #F5FEFF; border: 1px solid #BCEBFC; border-radius: 12px; padding: 14px; text-align: left; margin-bottom: 24px; }
+          .tip-title { color: #01A2FB; font-weight: bold; font-size: 13px; margin-bottom: 4px; }
+          .tip-desc { color: #393845; font-size: 12px; line-height: 1.4; margin: 0; }
+          .btn { background: #01A2FB; color: white; padding: 14px 24px; border-radius: 14px; text-decoration: none; font-weight: bold; display: inline-block; font-size: 14px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div style="font-size: 48px;">⚠️</div>
+          <h2>Permission Needed</h2>
+          <p>${message}</p>
+          <div class="tip">
+            <div class="tip-title">💡 How to fix:</div>
+            <p class="tip-desc">During Google Sign-In, make sure to <strong>check the box</strong> for <em>"View your email messages and settings"</em> so PointzPlus can read your loyalty statements.</p>
+          </div>
+          <a href="${WEB_RETURN_URL}" class="btn">Return to PointzPlus App</a>
+        </div>
       </body>
     </html>
   `;
@@ -57,12 +91,12 @@ export const emailSyncController = {
     const { code } = req.query;
     const userId = verifyOAuthState(req.query.state);
     if (!code) {
-      return res.status(400).send('Authorization code missing');
+      return res.status(400).send(errorPage('Authorization code missing. Please retry connecting from the app.'));
     }
     if (!userId) {
       return res
         .status(400)
-        .send('Invalid or expired OAuth state. Please reconnect from the app.');
+        .send(errorPage('Invalid or expired OAuth session. Please reconnect from the app.'));
     }
 
     try {
@@ -70,7 +104,7 @@ export const emailSyncController = {
       res.send(connectedPage(email));
     } catch (err) {
       console.error('Google callback error:', err);
-      res.status(500).send('Authentication failed: ' + err.message);
+      res.status(400).send(errorPage(err.message || 'Permission denied during Google Sign-In.'));
     }
   }),
 
@@ -91,8 +125,10 @@ export const emailSyncController = {
   }),
 
   disconnect: asyncHandler(async (req, res) => {
-    await gmailService.disconnect(req.userId, req.params.provider);
-    res.json({ message: 'Disconnected successfully' });
+    // req.params.provider holds the account id: disconnecting must target one
+    // specific mailbox now that a user can connect several.
+    const result = await gmailService.disconnect(req.userId, req.params.provider);
+    res.status(result.status).json(result.body);
   }),
 
   enableWatch: asyncHandler(async (req, res) => {

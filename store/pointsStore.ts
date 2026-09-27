@@ -7,12 +7,11 @@ import {
   DashboardSummary,
   CategorySummary,
   LoyaltyCategory,
-  ExtractedCoupon,
 } from "../types/loyalty";
 import { NotificationItem, SyncJob, SyncJobStatus, BackendLinkedAccount } from "../types/models";
 import { POPULAR_PROGRAMS, CATEGORY_LABELS } from "../constants/popularPrograms";
 import { apiClient } from "../lib/apiClient";
-import { notifyPointsEarned, notifySpecialOffer } from "../services/pushNotifications";
+import { notifyPointsEarned } from "../services/pushNotifications";
 
 // ─── Gmail sync job polling ────────────────────────────────────
 const SYNC_JOB_POLL_INTERVAL_MS = 2_000;
@@ -32,8 +31,8 @@ const SYNC_JOB_PROGRESS: Partial<Record<SyncJobStatus, (job: SyncJob) => SyncPro
     return {
       step:
         total > 0
-          ? `Extracting points & coupons (${done}/${total})…`
-          : "Extracting points & coupons from matched emails...",
+          ? `Extracting points (${done}/${total})…`
+          : "Extracting points from matched emails...",
       percent: 80 + Math.round(ratio * 12),
     };
   },
@@ -108,17 +107,20 @@ interface PointsState {
   accounts: LinkedAccount[];
   emailAccounts: EmailSyncAccount[];
   transactions: PointsTransaction[];
-  coupons: ExtractedCoupon[];
   notifications: NotificationItem[];
   isSyncing: boolean;
   syncProgress: { step: string; percent: number };
+  /**
+   * Current-month credit/debit totals as aggregated by the server.
+   * Null until the first successful load, so the UI can tell "0 this month"
+   * apart from "not loaded yet" and never has to invent a number.
+   */
+  monthlyFlows: { earned: number; redeemed: number } | null;
 
   // Computed Selectors
   getDashboardSummary: () => DashboardSummary;
   getCategorySummaries: () => CategorySummary[];
   getExpiringAccounts: () => LinkedAccount[];
-  getActiveCoupons: () => ExtractedCoupon[];
-  getExpiringCoupons: () => ExtractedCoupon[];
 
   // Actions
   addManualAccount: (params: {
@@ -140,12 +142,12 @@ interface PointsState {
     onProgressUpdate?: (step: string, percent: number) => void
   ) => Promise<LinkedAccount[]>;
 
-  disconnectEmail: (provider: "gmail") => Promise<void>;
+  /** Removes the mailbox whose email_sync_accounts id is given. */
+  disconnectEmail: (accountId: string) => Promise<void>;
   fetchAccountsFromBackend: () => Promise<void>;
-  fetchCouponsFromBackend: () => Promise<void>;
+  fetchPortfolioFromBackend: () => Promise<void>;
   fetchNotificationsFromBackend: () => Promise<void>;
   acknowledgeNotification: (id: string) => Promise<void>;
-  markCouponUsed: (id: string, isUsed?: boolean) => Promise<void>;
   refreshAll: () => Promise<void>;
 }
 
@@ -186,42 +188,18 @@ function mapNotification(raw: any): NotificationItem {
   };
 }
 
-function mapCoupon(raw: any): ExtractedCoupon {
-  return {
-    id: raw.id,
-    merchantName: raw.merchantName || raw.merchant_name,
-    category: (raw.category || "shopping") as LoyaltyCategory,
-    couponCode: raw.couponCode || raw.coupon_code,
-    couponType: raw.couponType || raw.coupon_type || "discount_code",
-    title: raw.title,
-    description: raw.description,
-    discountValue: raw.discountValue || raw.discount_value,
-    minimumSpendINR: Number(raw.minimumSpendINR ?? raw.minimum_spend_inr ?? 0),
-    expiryDate: raw.expiryDate || raw.expiry_date || null,
-    barcodeData: raw.barcodeData || raw.barcode_data,
-    qrCodeUrl: raw.qrCodeUrl || raw.qr_code_url,
-    redemptionUrl: raw.redemptionUrl || raw.redemption_url,
-    isUsed: Boolean(raw.isUsed ?? raw.is_used),
-    usedAt: raw.usedAt || raw.used_at || null,
-    sourceEmailSubject: raw.sourceEmailSubject || raw.source_email_subject,
-    sourceSender: raw.sourceSender || raw.source_sender,
-    confidenceScore: Number(raw.confidenceScore ?? raw.confidence_score ?? 0.95),
-    createdAt: raw.createdAt || raw.created_at,
-  };
-}
-
 export const usePointsStore = create<PointsState>((set, get) => ({
   accounts: [],
   emailAccounts: [],
   transactions: [],
-  coupons: [],
   notifications: [],
   isSyncing: false,
   syncProgress: { step: "Ready", percent: 0 },
+  monthlyFlows: null,
 
   // ─── Selectors ──────────────────────────────────────────────────
   getDashboardSummary: () => {
-    const { accounts, transactions } = get();
+    const { accounts, transactions, monthlyFlows } = get();
     const active = accounts.filter((a) => a.isActive);
 
     const totalPoints = active.reduce((sum, a) => sum + (a.currentBalance || 0), 0);
@@ -236,14 +214,20 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       const d = new Date(iso);
       return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     };
-    const monthlyEarned = transactions
+
+    // `transactions` is not loaded wholesale (the endpoint is per-account and
+    // paginated), so it would always be empty and report 0. The server already
+    // aggregates these in SQL, so prefer its figures and only fall back to the
+    // local list if the analytics call has not landed yet.
+    const localEarned = transactions
       .filter((t) => t.type === "credit" && inCurrentMonth(t.date))
       .reduce((sum, t) => sum + (t.points || 0), 0);
-    const monthlyRedeemed = transactions
+    const localRedeemed = transactions
       .filter((t) => (t.type === "debit" || t.type === "redeemed") && inCurrentMonth(t.date))
       .reduce((sum, t) => sum + (t.points || 0), 0);
 
-    const activeCouponsCount = get().coupons.filter((c) => !c.isUsed).length;
+    const monthlyEarned = monthlyFlows ? monthlyFlows.earned : localEarned;
+    const monthlyRedeemed = monthlyFlows ? monthlyFlows.redeemed : localRedeemed;
 
     return {
       totalPoints,
@@ -252,7 +236,6 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       expiringThisMonth,
       portfolioValueINR: Math.round(portfolioValueINR),
       linkedAccountsCount: active.length,
-      activeCouponsCount,
     };
   },
 
@@ -299,18 +282,6 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     return accounts.filter((a) => a.isActive && (a.expiringPoints || 0) > 0);
   },
 
-  getActiveCoupons: () => get().coupons.filter((c) => !c.isUsed),
-
-  getExpiringCoupons: () => {
-    const now = Date.now();
-    const in14d = now + 14 * 24 * 60 * 60 * 1000;
-    return get().coupons.filter((c) => {
-      if (c.isUsed || !c.expiryDate) return false;
-      const t = new Date(c.expiryDate).getTime();
-      return !isNaN(t) && t >= now && t <= in14d;
-    });
-  },
-
   // ─── Actions ────────────────────────────────────────────────────
   fetchAccountsFromBackend: async () => {
     try {
@@ -318,6 +289,7 @@ export const usePointsStore = create<PointsState>((set, get) => ({
         apiClient.getAccounts().catch(() => null),
         apiClient.getEmailAccounts().catch(() => null),
       ]);
+
       if (Array.isArray(backendAccounts)) {
         set({ accounts: backendAccounts.map(mapBackendAccount) });
       }
@@ -326,12 +298,11 @@ export const usePointsStore = create<PointsState>((set, get) => ({
           emailAccounts: backendEmailAccounts.map((e: any) => ({
             id: e.id,
             provider: (e.provider || "gmail") as "gmail",
-            email: e.email,
+            email: e.email_address || e.email || "",
             connectedAt: e.created_at || new Date().toISOString(),
-            lastSyncAt: e.last_sync_at || null,
-            status: e.is_active ? ("connected" as const) : ("needs_reauth" as const),
+            lastSyncAt: e.last_synced_at || e.last_sync_at || null,
+            status: (e.status === "connected" || e.is_active) ? ("connected" as const) : ("needs_reauth" as const),
             programsFound: Number(e.programs_found || 0),
-            couponsFound: 0,
           })),
         });
       }
@@ -340,28 +311,20 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     }
   },
 
-  fetchCouponsFromBackend: async () => {
+  fetchPortfolioFromBackend: async () => {
     try {
-      const rows = await apiClient.getCoupons();
-      if (Array.isArray(rows)) {
-        const previousIds = new Set(get().coupons.map((c) => c.id));
-        const next = rows.map(mapCoupon);
-        set({ coupons: next });
-
-        // Announce genuinely new offers, but never on the very first load.
-        if (previousIds.size > 0) {
-          const fresh = next.find((c) => !c.isUsed && !previousIds.has(c.id));
-          if (fresh) {
-            void notifySpecialOffer(
-              fresh.title || "New reward available",
-              fresh.description || "A new offer was added to your wallet.",
-              fresh.merchantName || "a partner"
-            );
-          }
-        }
-      }
+      const response = await apiClient.getPortfolioSummary();
+      const s = response?.summary;
+      if (!s) return;
+      set({
+        monthlyFlows: {
+          earned: Number(s.monthly_earned) || 0,
+          redeemed: Number(s.monthly_redeemed) || 0,
+        },
+      });
     } catch {
-      // Keep the current cache on network errors
+      // Keep monthlyFlows null so the UI falls back to the local transaction
+      // list instead of showing a confident zero that is really "unknown".
     }
   },
 
@@ -389,17 +352,6 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     } catch {
       // Leave the item unread so the user can retry.
     }
-  },
-
-  markCouponUsed: async (id: string, isUsed = true) => {
-    try {
-      await apiClient.markCouponUsed(id, isUsed);
-    } catch {}
-    set((state) => ({
-      coupons: state.coupons.map((c) =>
-        c.id === id ? { ...c, isUsed, usedAt: isUsed ? new Date().toISOString() : null } : c
-      ),
-    }));
   },
 
   addManualAccount: async ({
@@ -510,14 +462,17 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       // No fabricated fallback: a failure here surfaces to the user.
       const rows = await apiClient.getAccounts();
       const syncedAccounts = Array.isArray(rows) ? rows.map(mapBackendAccount) : [];
-      await get().fetchCouponsFromBackend();
 
       set((state) => {
         const previous = state.emailAccounts.find((e) => e.provider === provider);
         return {
           accounts: syncedAccounts,
+          // Keyed on the mailbox address, not the provider: a user may have
+          // several Gmail accounts connected and each keeps its own row.
           emailAccounts: [
-            ...state.emailAccounts.filter((e) => e.provider !== provider),
+            ...state.emailAccounts.filter(
+              (e) => !(e.provider === provider && e.email === email)
+            ),
             {
               id: previous?.id || `email_${Date.now()}`,
               provider,
@@ -526,7 +481,6 @@ export const usePointsStore = create<PointsState>((set, get) => ({
               lastSyncAt: new Date().toISOString(),
               status: "connected" as const,
               programsFound: job.programs_updated ?? syncedAccounts.length,
-              couponsFound: job.coupons_extracted ?? 0,
             },
           ],
           isSyncing: false,
@@ -551,12 +505,18 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     }
   },
 
-  disconnectEmail: async (provider) => {
+  /**
+   * Remove one mailbox. `accountId` is the email_sync_accounts row id — the
+   * server needs it to delete exactly one connection when several exist.
+   */
+  disconnectEmail: async (accountId) => {
     try {
-      await apiClient.disconnectEmail(provider);
-    } catch {}
+      await apiClient.disconnectEmail(accountId);
+    } catch {
+      // Fall through to the local update so the UI stays consistent.
+    }
     set((state) => ({
-      emailAccounts: state.emailAccounts.filter((e) => e.provider !== provider),
+      emailAccounts: state.emailAccounts.filter((e) => e.id !== accountId),
     }));
   },
 
@@ -565,8 +525,8 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     try {
       await Promise.all([
         get().fetchAccountsFromBackend(),
-        get().fetchCouponsFromBackend(),
         get().fetchNotificationsFromBackend(),
+        get().fetchPortfolioFromBackend(),
       ]);
     } finally {
       set({ isSyncing: false });

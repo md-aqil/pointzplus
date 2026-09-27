@@ -1,203 +1,228 @@
-// app/(tabs)/overview.tsx – Points Overview & Analytics with REAL data
-import React from "react";
-import { View, Text, ScrollView, TouchableOpacity } from "react-native";
+// app/(tabs)/overview.tsx – Point Overview & Breakdown with 100% Dynamic Real Data
+import React, { useEffect } from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ArrowLeft, TrendingUp, Calendar, PieChart as PieChartIcon, IndianRupee } from "lucide-react-native";
+import { Bell, ChevronRight, Mail, RefreshCw } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
+import { ScreenHeader } from "../../components/ui/ScreenHeader";
+import { PointsDonutChart, ChartSegment } from "../../components/charts/PointsDonutChart";
 import { usePoints } from "../../hooks/usePoints";
-import { useAuth } from "../../hooks/useAuth";
+
+const CATEGORY_PALETTE: Record<string, string> = {
+  banking: "#00A3FF", // Electric Azure Blue
+  airlines: "#9C4EBD", // Purple / Violet
+  shopping: "#02EFF4", // Vivid Cyan
+  hotels: "#30004C", // Deep Midnight Indigo
+  fuel: "#F59E0B", // Amber Gold
+  dining: "#EF4444", // Crimson Coral
+  telecom: "#10B981", // Emerald Green
+  entertainment: "#EC4899", // Magenta Pink
+  health: "#8B5CF6", // Violet
+};
 
 export default function OverviewScreen() {
   const router = useRouter();
-  const { user } = useAuth();
-  const { summary, categories, accounts, expiringAccounts } = usePoints();
+  const { summary, categories, isSyncing, refreshAll } = usePoints();
 
-  const displayName = user?.name || "Guest";
+  useEffect(() => {
+    refreshAll();
+  }, [refreshAll]);
+
+  // Compute dynamic segments from real categories
+  const segments: ChartSegment[] = categories
+    .filter((cat) => (cat.totalPoints || 0) > 0)
+    .map((cat, idx) => {
+      const catColor =
+        CATEGORY_PALETTE[cat.categoryId] ||
+        cat.accentColor ||
+        ["#00A3FF", "#9C4EBD", "#02EFF4", "#30004C"][idx % 4];
+
+      const percentage =
+        summary.totalPoints > 0
+          ? Math.round((cat.totalPoints / summary.totalPoints) * 100)
+          : 0;
+
+      return {
+        id: cat.categoryId,
+        label: cat.categoryName,
+        value: cat.totalPoints,
+        percentage,
+        color: catColor,
+      };
+    });
+
+  const totalDisplay = summary.totalPoints;
+  const redeemedDisplay = summary.monthlyRedeemed || 0;
 
   return (
-    <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">
-      {/* Header */}
-      <View className="px-5 py-3 flex-row items-center justify-between border-b border-border-light bg-white">
-        <TouchableOpacity
-          onPress={() => router.back()}
-          className="w-10 h-10 rounded-full bg-light-bg items-center justify-center"
-        >
-          <ArrowLeft size={20} color="#070617" />
-        </TouchableOpacity>
+    <SafeAreaView edges={["top"]} className="flex-1 bg-white">
+      {/* Centered Header with Notification Bell */}
+      <ScreenHeader
+        title="Point Overview"
+        showBack={false}
+        rightAction={
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/notifications");
+            }}
+            activeOpacity={0.7}
+            className="w-11 h-11 rounded-2xl bg-[#EBF7FC] items-center justify-center"
+          >
+            <Bell size={18} color="#111019" />
+          </TouchableOpacity>
+        }
+      />
 
-        <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-lg text-dark">
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 110 }}
+        className="px-5 pt-2"
+      >
+        {/* Section Heading: Points Overview */}
+        <Text
+          style={{ fontFamily: "PlusJakartaSans-Bold" }}
+          className="text-[16px] text-[#111019] font-bold mb-3 ml-0.5"
+        >
           Points Overview
         </Text>
 
-        <View className="w-10" />
-      </View>
-
-      <ScrollView showsVerticalScrollIndicator={false} className="px-5 pt-4">
-        {/* Portfolio Value Hero */}
-        <View className="bg-dark rounded-3xl p-6 mb-5 shadow-lg">
-          <View className="flex-row items-center justify-between mb-3">
-            <View>
-              <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-white/70 mb-1">
-                Total Rewards Value
-              </Text>
-              <View className="flex-row items-baseline">
-                <IndianRupee size={20} color="#02EFF4" />
-                <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-3xl text-primary ml-1">
-                  {summary.portfolioValueINR.toLocaleString()}
-                </Text>
-              </View>
-            </View>
-            <View className="w-12 h-12 rounded-full bg-primary/20 items-center justify-center">
-              <PieChartIcon size={24} color="#02EFF4" />
-            </View>
-          </View>
-
-          <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-white/60">
-            Across {summary.linkedAccountsCount} loyalty programs
-          </Text>
-        </View>
-
-        {/* 3 Stat Cards */}
-        <View className="flex-row justify-between gap-3 mb-5">
-          <View className="flex-1 bg-white rounded-2xl p-4 border border-border-light shadow-sm">
-            <View className="w-8 h-8 rounded-full bg-emerald-100 items-center justify-center mb-2">
-              <TrendingUp size={16} color="#059669" />
-            </View>
-            <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-dark-muted mb-1">
-              Earned This Month
+        {/* Top Summary Card (Total number & Redeem this month) */}
+        <View className="w-full bg-[#F0FAFE] border border-[#DCF0FA] rounded-2xl p-4.5 flex-row justify-between mb-5 shadow-sm">
+          <View>
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+              className="text-[22px] text-[#111019] font-bold tracking-tight mb-0.5"
+            >
+              {totalDisplay.toLocaleString()}
             </Text>
-            <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-lg text-dark">
-              +{summary.monthlyEarned.toLocaleString()}
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Regular" }}
+              className="text-[12.5px] text-[#7E7D8A]"
+            >
+              Total number
             </Text>
           </View>
 
-          <View className="flex-1 bg-white rounded-2xl p-4 border border-border-light shadow-sm">
-            <View className="w-8 h-8 rounded-full bg-red-100 items-center justify-center mb-2">
-              <Calendar size={16} color="#DC2626" />
-            </View>
-            <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-dark-muted mb-1">
-              Expiring Soon
+          <View className="items-end">
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+              className="text-[22px] text-[#111019] font-bold tracking-tight mb-0.5"
+            >
+              {redeemedDisplay.toLocaleString()}
             </Text>
-            <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-lg text-alert">
-              {summary.expiringThisMonth.toLocaleString()}
-            </Text>
-          </View>
-
-          <View className="flex-1 bg-white rounded-2xl p-4 border border-border-light shadow-sm">
-            <View className="w-8 h-8 rounded-full bg-violet-100 items-center justify-center mb-2">
-              <PieChartIcon size={16} color="#9C4EBD" />
-            </View>
-            <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-dark-muted mb-1">
-              Categories
-            </Text>
-            <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-lg text-dark">
-              {categories.length}
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Regular" }}
+              className="text-[12.5px] text-[#7E7D8A]"
+            >
+              Redeem this month
             </Text>
           </View>
         </View>
 
-        {/* Category Breakdown List */}
-        <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-base text-dark mb-3">
-          Points by Category
-        </Text>
-
-        {categories.length === 0 ? (
-          <View className="bg-white rounded-2xl p-6 border border-dashed border-border-light items-center mb-6">
-            <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-dark-muted text-center">
-              No categories yet. Add loyalty programs to see your breakdown.
+        {/* Breakdown Card */}
+        <View className="w-full bg-[#F4FBFE] border border-[#E0F3FB] rounded-3xl p-5 mb-6 shadow-sm">
+          <View className="flex-row items-center justify-between mb-2">
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+              className="text-[16px] text-[#111019] font-bold"
+            >
+              Breakdown
             </Text>
+            {isSyncing && <ActivityIndicator size="small" color="#00A3FF" />}
           </View>
-        ) : (
-          categories.map((cat) => {
-            const percentage = summary.totalPoints > 0 
-              ? ((cat.totalPoints / summary.totalPoints) * 100).toFixed(0) 
-              : 0;
 
-            return (
-              <View key={cat.categoryId} className="bg-white rounded-2xl p-4 border border-border-light mb-3 shadow-sm">
-                <View className="flex-row items-center justify-between mb-2">
-                  <View className="flex-row items-center flex-1 mr-3">
+          {/* SVG Donut Chart with Floating Badges & Center Count */}
+          <View className="items-center justify-center my-3">
+            <PointsDonutChart
+              segments={segments}
+              totalPoints={totalDisplay}
+              size={270}
+            />
+          </View>
+
+          {/* Category Rows Legend or Empty State */}
+          {segments.length > 0 ? (
+            <View className="mt-4 pt-2">
+              {segments.map((item, idx) => (
+                <TouchableOpacity
+                  key={item.id}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push(`/category/${item.id}`);
+                  }}
+                  activeOpacity={0.7}
+                  className={`flex-row items-center justify-between py-3.5 ${
+                    idx !== segments.length - 1 ? "border-b border-[#E8F4FA]" : ""
+                  }`}
+                >
+                  {/* Left side: color dot, title, percentage */}
+                  <View className="flex-row items-center flex-1 pr-2">
                     <View
-                      style={{ backgroundColor: cat.accentColor }}
-                      className="w-3 h-3 rounded-full mr-3"
+                      style={{ backgroundColor: item.color }}
+                      className="w-2.5 h-2.5 rounded-full mr-3"
                     />
-                    <View className="flex-1">
-                      <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-sm text-dark">
-                        {cat.categoryName}
-                      </Text>
-                      <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-dark-muted">
-                        {cat.brandCount} {cat.brandCount === 1 ? "brand" : "brands"}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View className="items-end">
-                    <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-base text-dark">
-                      {cat.totalPoints.toLocaleString()}
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Medium" }}
+                      className="text-[14px] text-[#35343E]"
+                    >
+                      {item.label}
                     </Text>
-                    <Text style={{ fontFamily: "PlusJakartaSans-Medium" }} className="text-xs text-dark-muted">
-                      {percentage}%
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                      className="text-[13px] text-[#7E7D8A] ml-2.5"
+                    >
+                      {item.percentage}%
                     </Text>
                   </View>
-                </View>
 
-                {/* Progress Bar */}
-                <View className="w-full bg-border-light h-2 rounded-full overflow-hidden">
-                  <View
-                    style={{ 
-                      width: `${percentage}%` as any, 
-                      backgroundColor: cat.accentColor 
-                    }}
-                    className="h-full rounded-full"
-                  />
-                </View>
-
-                {cat.expiringPoints > 0 && (
-                  <Text style={{ fontFamily: "PlusJakartaSans-Medium" }} className="text-xs text-alert mt-2">
-                    {cat.expiringPoints.toLocaleString()} pts expiring
-                  </Text>
-                )}
-              </View>
-            );
-          })
-        )}
-
-        {/* Expiring Soon Section */}
-        {expiringAccounts.length > 0 && (
-          <View className="mt-4 mb-6">
-            <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-base text-dark mb-3">
-              Points Expiring Soon
-            </Text>
-
-            {expiringAccounts.map((acc) => (
-              <View 
-                key={acc.id} 
-                className="bg-alert/5 rounded-2xl p-4 border border-alert/20 mb-2"
+                  {/* Right side: points count & chevron */}
+                  <View className="flex-row items-center">
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                      className="text-[15.5px] text-[#111019] font-bold mr-2"
+                    >
+                      {item.value.toLocaleString()}
+                    </Text>
+                    <ChevronRight size={16} strokeWidth={1.8} color="#5E5D6A" />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            <View className="mt-4 pt-2 items-center text-center">
+              <Text
+                style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                className="text-xs text-[#7E7D8A] text-center mb-3"
               >
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-row items-center flex-1 mr-2">
-                    <Text className="text-base mr-2">{acc.program.logoInitial}</Text>
-                    <View className="flex-1">
-                      <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-sm text-dark">
-                        {acc.program.name}
-                      </Text>
-                      <Text style={{ fontFamily: "PlusJakartaSans-Regular" }} className="text-xs text-dark-muted">
-                        Expires: {acc.expiryDate}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <Text style={{ fontFamily: "PlusJakartaSans-Bold" }} className="text-base text-alert">
-                    {acc.expiringPoints.toLocaleString()}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        <View className="pb-20" />
+                No loyalty statements scanned yet. Sync your email to automatically extract reward points.
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  router.push("/email-sync");
+                }}
+                activeOpacity={0.88}
+                className="bg-[#00A3FF] px-5 py-2.5 rounded-xl flex-row items-center shadow-sm"
+              >
+                <Mail size={14} color="#FFFFFF" className="mr-1.5" />
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-xs text-white font-bold ml-1"
+                >
+                  Sync Gmail Statements
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

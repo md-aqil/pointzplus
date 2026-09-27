@@ -43,6 +43,18 @@ echo ""
 echo "Adding sync job queue columns (claiming, heartbeat, retries)..."
 psql -d pointzplus -f "$MIGRATIONS_DIR/20260915_005_sync_job_queue.sql"
 
+echo ""
+echo "Removing the coupon / promo-token feature (points only)..."
+psql -d pointzplus -f "$MIGRATIONS_DIR/20260925_006_remove_coupons.sql"
+
+echo ""
+echo "Recording statement extraction source (AI vs rules)..."
+psql -d pointzplus -f "$MIGRATIONS_DIR/20260925_007_extraction_source.sql"
+
+echo ""
+echo "Allowing multiple connected mailboxes per user..."
+psql -d pointzplus -f "$MIGRATIONS_DIR/20260925_008_multi_email.sql"
+
 
 echo ""
 echo "=== Database Setup Complete ==="

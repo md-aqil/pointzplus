@@ -11,7 +11,6 @@ import authRoutes from './routes/auth.js';
 import accountsRoutes from './routes/accounts.js';
 import programsRoutes from './routes/programs.js';
 import emailSyncRoutes from './routes/emailSync.js';
-import couponsRoutes from './routes/coupons.js';
 import smsRoutes from './routes/sms.js';
 import notificationsRoutes from './routes/notifications.js';
 import analyticsRoutes from './routes/analytics.js';
@@ -75,7 +74,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountsRoutes);
 app.use('/api/programs', programsRoutes);
 app.use('/api/email-sync', emailSyncRoutes);
-app.use('/api/coupons', couponsRoutes);
 app.use('/api/sms', smsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 // Same router serves both original URLs: /api/analytics/* and /api/alerts/*.
@@ -96,8 +94,8 @@ async function startServer() {
     process.exit(1);
   }
 
-  const server = app.listen(PORT, () => {
-    console.log(`PointzPlus API server listening on http://localhost:${PORT} (db: connected)`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`PointzPlus API server listening on http://0.0.0.0:${PORT} (db: connected)`);
   });
 
   // Background Gmail sync worker. Jobs are claimed from sync_jobs with
