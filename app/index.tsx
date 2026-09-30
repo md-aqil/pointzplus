@@ -12,6 +12,8 @@ import Animated, {
   withSequence,
 } from "react-native-reanimated";
 import { PointzPlusLogo } from "../components/ui/PointzPlusLogo";
+import { useAuthStore } from "../store/authStore";
+import { apiClient } from "../lib/apiClient";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -24,11 +26,22 @@ export default function SplashScreen() {
     logoScale.value = withSpring(1, { damping: 14, stiffness: 120 });
     opacity.value = withTiming(1, { duration: 700 });
 
-    const timer = setTimeout(() => {
-      router.replace("/onboarding");
-    }, 2200);
+    const checkAuthAndNavigate = async () => {
+      const token = await apiClient.restoreToken();
+      const isAuth = useAuthStore.getState().isAuthenticated || Boolean(token);
 
-    return () => clearTimeout(timer);
+      const timer = setTimeout(() => {
+        if (isAuth) {
+          router.replace("/(tabs)/home");
+        } else {
+          router.replace("/onboarding");
+        }
+      }, 1500);
+
+      return () => clearTimeout(timer);
+    };
+
+    checkAuthAndNavigate();
   }, []);
 
   const animatedStyle = useAnimatedStyle(() => ({

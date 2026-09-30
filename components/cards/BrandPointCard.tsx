@@ -1,7 +1,7 @@
 // components/cards/BrandPointCard.tsx – Works with LinkedAccount from pointsStore
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
-import { ChevronRight, Clock, ShieldCheck } from "lucide-react-native";
+import { Clock } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { LinkedAccount } from "../../types/loyalty";
 
@@ -19,73 +19,58 @@ export const BrandPointCard: React.FC<BrandPointCardProps> = ({
     onPress?.();
   };
 
+  const subtitleText =
+    account.expiringPoints > 0 && account.expiryDate
+      ? `${account.expiringPoints.toLocaleString()} expire ${account.expiryDate}`
+      : account.accountNumberMasked && account.accountNumberMasked !== "MEMBER-***"
+      ? `Member: ${account.accountNumberMasked}`
+      : account.sourceSender
+      ? `Extracted from ${account.sourceSender.split("@")[1] || account.sourceSender}`
+      : "Synced via Gmail";
+
   return (
     <TouchableOpacity
       onPress={handlePress}
       activeOpacity={0.85}
-      className="w-full bg-white rounded-2xl p-4 border border-border-light mb-3 shadow-sm"
+      className="w-full bg-white rounded-2xl p-4 border border-[#E6F6FF] mb-3 shadow-sm flex-row items-center justify-between"
     >
-      <View className="flex-row items-center justify-between mb-3">
-        <View className="flex-row items-center flex-1 mr-2">
-          <View
-            style={{ backgroundColor: `${account.program.accentColor}15` }}
-            className="w-10 h-10 rounded-xl items-center justify-center mr-3 border"
-          >
-            <Text className="text-base">{account.program.logoInitial}</Text>
-          </View>
-
-          <View className="flex-1">
-            <Text
-              style={{ fontFamily: "PlusJakartaSans-Bold" }}
-              className="text-sm text-dark"
-            >
-              {account.program.name}
-            </Text>
-            <Text
-              style={{ fontFamily: "PlusJakartaSans-Regular" }}
-              className="text-xs text-dark-muted capitalize"
-            >
-              {account.program.category} • {account.accountNumberMasked}
-            </Text>
-          </View>
+      <View className="flex-row items-center flex-1 mr-3">
+        {/* Brand Logo Circle */}
+        <View
+          style={{ backgroundColor: `${account.program.accentColor || "#01A2FB"}15` }}
+          className="w-11 h-11 rounded-full items-center justify-center mr-3 border border-[#E6F6FF]"
+        >
+          <Text className="text-base">{account.program.logoInitial || "✈️"}</Text>
         </View>
 
-        <View className="items-end">
+        {/* Brand Details */}
+        <View className="flex-1">
           <Text
             style={{ fontFamily: "PlusJakartaSans-Bold" }}
-            className="text-base text-dark"
+            className="text-sm text-dark"
+            numberOfLines={1}
           >
-            {account.currentBalance.toLocaleString()}
+            {account.program.name}
           </Text>
           <Text
-            style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
-            className="text-[10px] text-primary-dark"
+            style={{ fontFamily: "PlusJakartaSans-Regular" }}
+            className="text-xs text-muted mt-0.5"
+            numberOfLines={1}
           >
-            pts
+            {subtitleText}
           </Text>
         </View>
       </View>
 
-      {account.expiringPoints > 0 && (
-        <View className="flex-row items-center justify-between pt-2.5 border-t border-border-light/60">
-          <View className="flex-row items-center">
-            <Clock size={12} color="#FF4343" className="mr-1.5" />
-            <Text
-              style={{ fontFamily: "PlusJakartaSans-Medium" }}
-              className="text-xs text-alert ml-1.5"
-            >
-              {account.expiringPoints.toLocaleString()} pts expire {account.expiryDate}
-            </Text>
-          </View>
-
-          <Text
-            style={{ fontFamily: "PlusJakartaSans-Bold" }}
-            className="text-xs text-dark-muted"
-          >
-            Details →
-          </Text>
-        </View>
-      )}
+      {/* Points Balance */}
+      <View className="items-end">
+        <Text
+          style={{ fontFamily: "PlusJakartaSans-Bold" }}
+          className="text-base text-dark"
+        >
+          {account.currentBalance.toLocaleString()}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 };

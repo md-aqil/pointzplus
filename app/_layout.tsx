@@ -1,6 +1,7 @@
 // app/_layout.tsx – Root layout with custom fonts, safe areas & providers
 import "../global.css";
 import React, { useEffect, useRef } from "react";
+import { View, Platform } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -118,31 +119,67 @@ export default function RootLayout() {
     return null;
   }
 
+  const stackContent = (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: "#F5FEFF" },
+        animation: "slide_from_right",
+      }}
+    >
+      <Stack.Screen name="index" />
+      <Stack.Screen name="onboarding" />
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="category/index" />
+      <Stack.Screen name="category/[id]" />
+      <Stack.Screen name="search" />
+      <Stack.Screen name="notifications" />
+      <Stack.Screen name="settings/profile-settings" />
+      <Stack.Screen name="settings/notification-settings" />
+      <Stack.Screen name="settings/delete-account" />
+      <Stack.Screen name="legal/privacy" />
+    </Stack>
+  );
+
   return (
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: "#F5FEFF" },
-            animation: "slide_from_right",
-          }}
-        >
-          <Stack.Screen name="index" />
-          <Stack.Screen name="onboarding" />
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="category/index" />
-          <Stack.Screen name="category/[id]" />
-          <Stack.Screen name="search" />
-          <Stack.Screen name="notifications" />
-          <Stack.Screen name="settings/profile-settings" />
-          <Stack.Screen name="settings/notification-settings" />
-          <Stack.Screen name="settings/delete-account" />
-          <Stack.Screen name="legal/privacy" />
-        </Stack>
+        {Platform.OS === "web" ? (
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: "#070617",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "100vh" as any,
+              width: "100%",
+            }}
+          >
+            <View
+              style={{
+                width: "100%",
+                maxWidth: 430,
+                height: "100%",
+                minHeight: "100vh" as any,
+                backgroundColor: "#F5FEFF",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 10 },
+                shadowOpacity: 0.35,
+                shadowRadius: 25,
+                overflow: "hidden",
+                position: "relative",
+              }}
+            >
+              {stackContent}
+            </View>
+          </View>
+        ) : (
+          stackContent
+        )}
         <StatusBar style="dark" />
       </QueryClientProvider>
     </SafeAreaProvider>
   );
 }
+

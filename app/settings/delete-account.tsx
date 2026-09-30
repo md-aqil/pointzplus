@@ -1,4 +1,3 @@
-// app/settings/delete-account.tsx – Delete Account screen matching Penpot Design
 import React, { useState } from "react";
 import {
   View,
@@ -9,6 +8,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -49,33 +49,45 @@ export default function DeleteAccountScreen() {
     );
   };
 
+  const executeDelete = async () => {
+    setLoading(true);
+    try {
+      await apiClient.deleteCurrentUser();
+      await signOut();
+      router.replace("/(auth)/sign-in");
+    } catch (err) {
+      setLoading(false);
+      const msg = "We couldn't delete your account right now. Please check your connection and try again.";
+      if (Platform.OS === "web") {
+        if (typeof window !== "undefined") window.alert(msg);
+      } else {
+        Alert.alert("Deletion Failed", msg);
+      }
+    }
+  };
+
   const handleDelete = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
 
+    const message =
+      "Are you absolutely sure you want to delete your account? All your linked loyalty accounts, tracked points, and history will be permanently wiped.";
+
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(message)) {
+        executeDelete();
+      }
+      return;
+    }
+
     Alert.alert(
       "Permanent Deletion",
-      "Are you absolutely sure you want to delete your account? All your linked loyalty accounts, tracked points, and history will be permanently wiped.",
+      message,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete My Account",
           style: "destructive",
-          onPress: async () => {
-            setLoading(true);
-            try {
-              await apiClient.deleteCurrentUser();
-            } catch (err) {
-              setLoading(false);
-              Alert.alert(
-                "Deletion Failed",
-                "We couldn't delete your account right now. Please check your connection and try again."
-              );
-              return;
-            }
-            setLoading(false);
-            await signOut();
-            router.replace("/(auth)/sign-in");
-          },
+          onPress: executeDelete,
         },
       ]
     );
@@ -225,15 +237,18 @@ export default function DeleteAccountScreen() {
                 shadowRadius: 12,
                 elevation: 4,
               }}
-              className="w-full flex-row items-center justify-center py-3.5 px-6"
+              className={`w-full flex-row items-center justify-center py-3.5 px-6 ${loading ? "opacity-70" : ""}`}
             >
               {loading ? (
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-white text-[15px]"
-                >
-                  Deleting...
-                </Text>
+                <View className="flex-row items-center justify-center" style={{ gap: 8 }}>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-white text-[15px]"
+                  >
+                    Deleting...
+                  </Text>
+                </View>
               ) : (
                 <View className="flex-row items-center justify-center" style={{ gap: 10 }}>
                   <Text

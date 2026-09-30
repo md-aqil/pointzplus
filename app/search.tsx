@@ -8,12 +8,15 @@ import { ScreenHeader } from "../components/ui/ScreenHeader";
 import { Input } from "../components/ui/Input";
 import { CategoryCard } from "../components/cards/CategoryCard";
 import { BrandPointCard } from "../components/cards/BrandPointCard";
+import { AccountStatementModal } from "../components/ui/AccountStatementModal";
+import { LinkedAccount } from "../types/loyalty";
 import { usePoints } from "../hooks/usePoints";
 
 export default function SearchScreen() {
   const router = useRouter();
   const { accounts, categories } = usePoints();
   const [query, setQuery] = useState("");
+  const [selectedAccount, setSelectedAccount] = useState<LinkedAccount | null>(null);
 
   const filteredCategories = categories.filter((c) =>
     c.categoryName.toLowerCase().includes(query.toLowerCase())
@@ -84,7 +87,7 @@ export default function SearchScreen() {
               <BrandPointCard
                 key={account.id}
                 account={account}
-                onPress={() => router.push(`/category/${account.program.category}`)}
+                onPress={() => setSelectedAccount(account)}
               />
             ))}
           </View>
@@ -108,6 +111,13 @@ export default function SearchScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* Statement Details & Proof Modal */}
+      <AccountStatementModal
+        visible={Boolean(selectedAccount)}
+        account={selectedAccount}
+        onClose={() => setSelectedAccount(null)}
+      />
     </SafeAreaView>
   );
 }

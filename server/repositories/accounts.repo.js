@@ -19,7 +19,25 @@ const LIST_SQL = `
     lp.category,
     lp.logo_initial,
     lp.accent_color,
-    lp.point_value_inr
+    lp.point_value_inr,
+    (
+      SELECT es.subject
+      FROM email_statements es
+      WHERE es.matched_program_id = la.program_id AND es.user_id = la.user_id
+      ORDER BY es.received_at DESC LIMIT 1
+    ) as source_subject,
+    (
+      SELECT es.from_email
+      FROM email_statements es
+      WHERE es.matched_program_id = la.program_id AND es.user_id = la.user_id
+      ORDER BY es.received_at DESC LIMIT 1
+    ) as source_sender,
+    (
+      SELECT es.extraction_source
+      FROM email_statements es
+      WHERE es.matched_program_id = la.program_id AND es.user_id = la.user_id
+      ORDER BY es.received_at DESC LIMIT 1
+    ) as extraction_source
   FROM linked_accounts la
   JOIN loyalty_programs lp ON la.program_id = lp.id
   WHERE la.user_id = $1

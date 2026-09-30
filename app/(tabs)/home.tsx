@@ -18,6 +18,9 @@ import {
   Plane,
   ShoppingBag,
   Building2,
+  Layers,
+  Utensils,
+  Fuel,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { DashboardTopBg } from "../../components/ui/DashboardTopBg";
@@ -60,49 +63,98 @@ export default function HomeScreen() {
     categoryBrandCounts[c.categoryId] = c.brandCount;
   });
 
-  // Categories data matching design cards
-  const categoriesList = [
-    {
-      id: "banking",
-      name: "Banking & Cards",
-      subtext: `${categoryBrandCounts["banking"] ?? 0} brands`,
-      bgColor: "#F0FDFE",
-      borderColor: "#D8F3F8",
-      iconBg: "#38BDF8",
-      icon: <CreditCard size={20} color="#FFFFFF" />,
-      route: "/category/banking",
-    },
-    {
-      id: "airlines",
-      name: "Airlines",
-      subtext: `${categoryBrandCounts["airlines"] ?? 0} brands`,
-      bgColor: "#FAF5FF",
-      borderColor: "#F3E8FF",
-      iconBg: "#A855F7",
-      icon: <Plane size={20} color="#FFFFFF" />,
-      route: "/category/airlines",
-    },
-    {
-      id: "shopping",
-      name: "Shopping",
-      subtext: `${categoryBrandCounts["shopping"] ?? 0} brands`,
-      bgColor: "#F0FDFA",
-      borderColor: "#CCFBF1",
-      iconBg: "#2DD4BF",
-      icon: <ShoppingBag size={20} color="#FFFFFF" />,
-      route: "/category/shopping",
-    },
-    {
-      id: "hotels",
-      name: "Hotels",
-      subtext: `${categoryBrandCounts["hotels"] ?? 0} brands`,
-      bgColor: "#FFFBEB",
-      borderColor: "#FEF3C7",
-      iconBg: "#F59E0B",
-      icon: <Building2 size={20} color="#FFFFFF" />,
-      route: "/category/hotels",
-    },
-  ];
+  const getCategoryMeta = (catId: string) => {
+    switch (catId) {
+      case "airlines":
+        return {
+          name: "Airlines",
+          bgColor: "#FAF5FF",
+          borderColor: "#F3E8FF",
+          iconBg: "#A855F7",
+          icon: <Plane size={20} color="#FFFFFF" />,
+        };
+      case "other":
+        return {
+          name: "Growth & Other",
+          bgColor: "#FDF4FF",
+          borderColor: "#FAE8FF",
+          iconBg: "#9C4EBD",
+          icon: <Layers size={20} color="#FFFFFF" />,
+        };
+      case "shopping":
+      case "retail":
+        return {
+          name: "Shopping",
+          bgColor: "#F0FDFA",
+          borderColor: "#CCFBF1",
+          iconBg: "#2DD4BF",
+          icon: <ShoppingBag size={20} color="#FFFFFF" />,
+        };
+      case "banking":
+        return {
+          name: "Banking & Cards",
+          bgColor: "#F0FDFE",
+          borderColor: "#D8F3F8",
+          iconBg: "#38BDF8",
+          icon: <CreditCard size={20} color="#FFFFFF" />,
+        };
+      case "hotels":
+        return {
+          name: "Hotels",
+          bgColor: "#FFFBEB",
+          borderColor: "#FEF3C7",
+          iconBg: "#F59E0B",
+          icon: <Building2 size={20} color="#FFFFFF" />,
+        };
+      case "dining":
+        return {
+          name: "Dining Out",
+          bgColor: "#FFF1F2",
+          borderColor: "#FFE4E6",
+          iconBg: "#EF4444",
+          icon: <Utensils size={20} color="#FFFFFF" />,
+        };
+      case "fuel":
+        return {
+          name: "Fuel & Mobility",
+          bgColor: "#FFF7ED",
+          borderColor: "#FFEDD5",
+          iconBg: "#F97316",
+          icon: <Fuel size={20} color="#FFFFFF" />,
+        };
+      default:
+        return {
+          name: catId.charAt(0).toUpperCase() + catId.slice(1),
+          bgColor: "#F0FAFE",
+          borderColor: "#DCF0FA",
+          iconBg: "#01A2FB",
+          icon: <Layers size={20} color="#FFFFFF" />,
+        };
+    }
+  };
+
+  // Build ordered dynamic categories list: prioritize active categories with points
+  const activeCategoryIds = categories
+    .filter((c) => (c.brandCount || 0) > 0)
+    .map((c) => c.categoryId);
+
+  const fallbackCategoryIds = ["airlines", "other", "shopping", "banking", "hotels", "dining", "fuel"];
+  const orderedCategoryIds = Array.from(new Set([...activeCategoryIds, ...fallbackCategoryIds]));
+
+  const categoriesList = orderedCategoryIds.map((catId) => {
+    const meta = getCategoryMeta(catId);
+    const count = categoryBrandCounts[catId] ?? 0;
+    return {
+      id: catId,
+      name: meta.name,
+      subtext: `${count} ${count === 1 ? "brand" : "brands"}`,
+      bgColor: meta.bgColor,
+      borderColor: meta.borderColor,
+      iconBg: meta.iconBg,
+      icon: meta.icon,
+      route: `/category/${catId}`,
+    };
+  });
 
   return (
     <View className="flex-1 bg-[#F8FAFC]">
@@ -475,6 +527,8 @@ export default function HomeScreen() {
               </TouchableOpacity>
             ))}
           </ScrollView>
+
+          {/* End of categories */}
         </View>
       </ScrollView>
     </View>

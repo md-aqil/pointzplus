@@ -1,5 +1,4 @@
-// app/onboarding.tsx – 100% Exact Match to Penpot Onboarding Screen
-import React from "react";
+import React, { useEffect } from "react";
 import {
   View,
   Text,
@@ -14,11 +13,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { TrendingUp, Star, Gift } from "lucide-react-native";
 import { PointzPlusLogo } from "../components/ui/PointzPlusLogo";
+import { useAuthStore } from "../store/authStore";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.replace("/(tabs)/home");
+    }
+  }, [isAuthenticated]);
 
   const features = [
     {
@@ -103,7 +110,7 @@ export default function OnboardingScreen() {
 
           <TouchableOpacity
             style={styles.secondaryButton}
-            onPress={() => router.push("/(tabs)/home")}
+            onPress={() => router.push("/(tabs)/deals")}
             activeOpacity={0.7}
           >
             <Text style={styles.secondaryButtonText}>Explore deals</Text>

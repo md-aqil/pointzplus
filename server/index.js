@@ -14,6 +14,7 @@ import emailSyncRoutes from './routes/emailSync.js';
 import smsRoutes from './routes/sms.js';
 import notificationsRoutes from './routes/notifications.js';
 import analyticsRoutes from './routes/analytics.js';
+import dealsRoutes from './routes/deals.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -76,6 +77,7 @@ app.use('/api/programs', programsRoutes);
 app.use('/api/email-sync', emailSyncRoutes);
 app.use('/api/sms', smsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/deals', dealsRoutes);
 // Same router serves both original URLs: /api/analytics/* and /api/alerts/*.
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/alerts', analyticsRoutes);

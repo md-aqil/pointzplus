@@ -1,4 +1,3 @@
-// app/(tabs)/profile.tsx – Profile Hub with balanced, calibrated list spacing
 import React from "react";
 import {
   View,
@@ -6,6 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -32,15 +32,27 @@ export default function ProfileScreen() {
 
   const handleSignOut = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+
+    const performSignOut = async () => {
+      try {
+        await signOut();
+      } catch {}
+      router.replace("/(auth)/sign-in");
+    };
+
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm("Are you sure you want to sign out of PointzPlus?")) {
+        performSignOut();
+      }
+      return;
+    }
+
     Alert.alert("Sign Out", "Are you sure you want to sign out of PointzPlus?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Sign Out",
         style: "destructive",
-        onPress: async () => {
-          await signOut();
-          router.replace("/(auth)/sign-in");
-        },
+        onPress: performSignOut,
       },
     ]);
   };

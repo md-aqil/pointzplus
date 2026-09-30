@@ -57,6 +57,9 @@ export interface BackendLinkedAccount {
   logo_initial?: string | null;
   accent_color?: string | null;
   point_value_inr?: number | string | null;
+  source_subject?: string | null;
+  source_sender?: string | null;
+  extraction_source?: string | null;
 }
 
 /**

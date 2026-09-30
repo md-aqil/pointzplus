@@ -1,7 +1,7 @@
-// store/authStore.ts – Authentication Zustand state slice
 import { create } from "zustand";
 import { UserProfile } from "../types/models";
 import { apiClient } from "../lib/apiClient";
+import { usePointsStore } from "./pointsStore";
 
 interface AuthState {
   user: UserProfile | null;
@@ -78,7 +78,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
+    try {
+      await apiClient.logout();
+    } catch {}
     apiClient.clearToken();
+    try {
+      usePointsStore.getState().reset();
+    } catch {}
     set({ user: null, token: null, isAuthenticated: false });
   },
 

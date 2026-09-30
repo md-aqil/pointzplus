@@ -119,31 +119,26 @@ export async function isAuthorizedPubSubRequest(req) {
 
 // ─── Gmail search & body helpers ─────────────────────────────────
 
-// How far back a scan looks. Overridable so a deliberate deep rescan can
-// recover older statements (e.g. SYNC_LOOKBACK_DAYS=1825 for ~5 years)
-// without editing code. Defaults to the normal 60-day window.
+// How far back an initial scan looks. Defaults to 365 days (1 full year)
+// to discover all monthly statements, flight miles, and loyalty balances.
 const SYNC_LOOKBACK_DAYS = Math.max(
   1,
-  Number.parseInt(process.env.SYNC_LOOKBACK_DAYS || '60', 10) || 60
+  Number.parseInt(process.env.SYNC_LOOKBACK_DAYS || '365', 10) || 365
 );
 
 // Share of each scan's message cap reserved for the keyword search, so a
 // statement from an uncatalogued sender is still reachable. The floor is 5.
 const KEYWORD_BUDGET_RATIO = 0.3;
 
-// Broad terms used to find loyalty mail whose sender is not in the catalogue.
-// Kept as a standalone constant so the keyword-only phase can reuse it.
-const KEYWORD_TERMS =
-  'points OR miles OR "reward points" OR SuperCoins OR statement OR "reward balance" OR "points balance" OR "loyalty statement" OR "points statement"';
+// Universal Loyalty & Statement Search Intent (Domain-Agnostic)
+// Discovers statements, reward summaries, coin updates, e-statements, points, and miles from ANY sender.
+export const UNIVERSAL_LOYALTY_QUERY =
+  'subject:(points OR miles OR reward OR rewards OR statement OR balance OR cashback OR coins OR supercoins OR neucoins OR loyalty OR bluchip OR flyerbonus OR "e-statement" OR "account update") OR (points OR miles OR rewards OR SuperCoins OR NeuCoins OR "reward points" OR "points balance" OR "available balance")';
 
 export function buildLoyaltySearchQuery(domains = [], lookbackDays = SYNC_LOOKBACK_DAYS) {
-  const unique = [...new Set(domains.filter(Boolean))];
-  const domainFilters = unique.slice(0, 25).map((d) => `from:${d}`).join(' OR ');
   const dateFilter = `newer_than:${lookbackDays}d`;
-  if (domainFilters) {
-    return `((${domainFilters}) OR (${KEYWORD_TERMS})) ${dateFilter}`;
-  }
-  return `(${KEYWORD_TERMS}) ${dateFilter}`;
+  // Domain-agnostic universal intent query
+  return `(${UNIVERSAL_LOYALTY_QUERY}) ${dateFilter}`;
 }
 
 export function extractDomain(fromHeader) {
@@ -175,11 +170,51 @@ export function extractBodyParts(payload) {
   return { text, html };
 }
 
+export function findPdfAttachments(payload) {
+  const pdfs = [];
+  function traverse(part) {
+    if (!part) return;
+    const filename = part.filename || '';
+    const isPdf =
+      part.mimeType === 'application/pdf' ||
+      (typeof filename === 'string' && filename.toLowerCase().endsWith('.pdf'));
+    if (isPdf && part.body?.attachmentId) {
+      pdfs.push({
+        filename: filename || 'statement.pdf',
+        attachmentId: part.body.attachmentId,
+        size: part.body.size || 0,
+      });
+    }
+    if (part.parts) {
+      for (const p of part.parts) traverse(p);
+    }
+  }
+  traverse(payload);
+  return pdfs;
+}
+
+async function fetchAttachmentData(gmail, messageId, attachmentId) {
+  try {
+    const res = await gmail.users.messages.attachments.get({
+      userId: 'me',
+      messageId,
+      id: attachmentId,
+    });
+    const rawData = res.data?.data;
+    if (!rawData) return null;
+    return rawData.replace(/-/g, '+').replace(/_/g, '/');
+  } catch (err) {
+    console.warn(`[GmailService] Attachment fetch failed for ${attachmentId}:`, err.message);
+    return null;
+  }
+}
+
 // ─── Persistence (via repository) ────────────────────────────────
 
 async function persistLoyaltyResult(userId, parsed, fromHeader, subjectHeader, receivedAt, preview, provider, syncAccountId) {
   const detected = parsed.loyaltyData;
-  const domain = extractDomain(fromHeader);
+  const { effectiveFrom } = StatementParser.unwrapForwardedEmail(fromHeader, subjectHeader);
+  const domain = extractDomain(effectiveFrom || fromHeader);
   const program = await EmailSyncRepo.findOrCreateProgramForStatement(domain, detected);
   if (!program) return { added: false, updated: false };
 
@@ -248,14 +283,14 @@ async function fetchMessageWithBackoff(gmail, id) {
   throw lastErr;
 }
 
-// Cap on messages fetched per scan. A deep lookback needs headroom, so the
-// cap scales with SYNC_LOOKBACK_DAYS (60d -> 40, ~5y -> 200).
-const DEFAULT_MAX_RESULTS = 40;
+// Maximum matching messages to scan. Defaults to 500 matching statements.
+// Can be set higher via SYNC_MAX_RESULTS if needed.
+const DEFAULT_MAX_RESULTS = 500;
 
 function resolveMaxResults() {
   const override = Number.parseInt(process.env.SYNC_MAX_RESULTS || '', 10);
   if (Number.isFinite(override) && override > 0) return override;
-  return Math.min(200, Math.round(DEFAULT_MAX_RESULTS * (SYNC_LOOKBACK_DAYS / 60)));
+  return DEFAULT_MAX_RESULTS;
 }
 
 async function scanGmailMessages(account, { maxResults = null, historyId = null, jobId = null } = {}) {
@@ -310,71 +345,35 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
     }
 
     if (messages.length === 0) {
-      // Two-phase search. A single combined query returns the *newest* N
-      // matches, and the broad keyword branch (points/statement) is
-      // dominated by newsletters — so loyalty mail beyond the cap is never
-      // seen. Phase 1 queries each program domain directly (these are
-      // unambiguous), phase 2 tops up with the keyword search using whatever
-      // budget is left. A deep lookback therefore actually reaches old mail.
-      const perDomain = Math.max(
-        1,
-        Math.ceil(cap / Math.max(1, domains.length))
-      );
-      const domainQueries = domains.map((d) => `from:${d} newer_than:${SYNC_LOOKBACK_DAYS}d`);
-
-      const domainResults = await Promise.all(
-        domainQueries.map((q) =>
-          gmail.users
-            .messages
-            .list({ userId: 'me', q, maxResults: perDomain })
-            .then((r) => r.data.messages || [])
-            .catch((e) => {
-              console.warn(`Gmail domain search failed (${q}):`, e.message);
-              return [];
-            })
-        )
-      );
-
+      // Universal Intent Discovery: Search across the entire mailbox for all statement/points emails
       const seen = new Set();
-      for (const list of domainResults) {
-        for (const m of list) {
-          if (!seen.has(m.id)) {
-            seen.add(m.id);
-            messages.push(m);
-          }
-        }
-      }
+      let pageToken = undefined;
 
-      // Top up with keyword matches. A slice of the budget is always reserved:
-      // when every program domain is well represented the domain pass alone can
-      // fill the cap, and a statement from a sender the catalogue does not know
-      // (so no `from:` filter would match) could never be found at all.
-      const keywordBudget = Math.max(
-        5,
-        Math.floor(cap * KEYWORD_BUDGET_RATIO),
-        0
-      );
-      const domainBudget = Math.max(0, cap - keywordBudget);
-      const remaining = Math.min(keywordBudget, Math.max(0, domainBudget - messages.length));
+      do {
+        const pageSize = Math.min(500, cap - messages.length);
+        if (pageSize <= 0) break;
 
-      if (remaining > 0) {
-        // Keyword-only here (not the combined query): any `from:` clause would
-        // just re-return the domain matches already collected in phase 1.
         const listRes = await gmail.users.messages.list({
           userId: 'me',
-          q: `(${KEYWORD_TERMS}) newer_than:${SYNC_LOOKBACK_DAYS}d`,
-          maxResults: remaining,
+          q: searchQuery,
+          maxResults: pageSize,
+          pageToken,
         });
-        for (const m of listRes.data.messages || []) {
+
+        const rawMessages = listRes.data?.messages || [];
+        for (const m of rawMessages) {
           if (!seen.has(m.id)) {
             seen.add(m.id);
             messages.push(m);
           }
         }
-      }
 
-      // Newest first so the capped set reflects current balances.
-      messages.sort((a, b) => (Number(b.internalDate) || b.id?.length || 0) - (Number(a.internalDate) || a.id?.length || 0));
+        pageToken = listRes.data?.nextPageToken;
+        if (!pageToken || messages.length >= cap) break;
+      } while (pageToken);
+
+      // Sort oldest-to-newest so the latest statement is parsed last and reflects the true current balance.
+      messages.reverse();
     }
   } catch (searchErr) {
     console.warn('Gmail search fallback:', searchErr.message);
@@ -383,7 +382,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
       q: `(points OR miles OR "reward points" OR "points balance" OR statement) newer_than:${SYNC_LOOKBACK_DAYS}d`,
       maxResults: Math.min(20, cap),
     });
-    messages = fallbackRes.data.messages || [];
+    messages = fallbackRes.data?.messages || [];
   }
 
   // Fetching is done. Publish the parse phase and the real match count so the
@@ -408,6 +407,23 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
       const { text, html } = extractBodyParts(detail.data.payload);
       const preview = (text || html.replace(/<[^>]+>/g, ' ')).substring(0, 200);
 
+      const pdfMetaList = findPdfAttachments(detail.data.payload);
+      const pdfAttachments = [];
+
+      // Download attached statement PDFs (up to 2 per message, max 10MB each)
+      if (pdfMetaList.length > 0) {
+        for (const meta of pdfMetaList.slice(0, 2)) {
+          if (meta.size && meta.size > 10 * 1024 * 1024) continue;
+          const base64Data = await fetchAttachmentData(gmail, msg.id, meta.attachmentId);
+          if (base64Data) {
+            pdfAttachments.push({
+              filename: meta.filename,
+              base64Data,
+            });
+          }
+        }
+      }
+
       const parsed = await AIStatementParser.parseEmail({
         messageId: msg.id,
         fromHeader,
@@ -415,6 +431,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
         bodyText: text,
         bodyHtml: html,
         receivedDate: dateHeader,
+        pdfAttachments,
       });
 
       if (parsed.isLoyaltyStatement && parsed.loyaltyData) {

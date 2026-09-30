@@ -1,11 +1,11 @@
-// app/(tabs)/overview.tsx – Point Overview & Breakdown with 100% Dynamic Real Data
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -25,15 +25,24 @@ const CATEGORY_PALETTE: Record<string, string> = {
   telecom: "#10B981", // Emerald Green
   entertainment: "#EC4899", // Magenta Pink
   health: "#8B5CF6", // Violet
+  other: "#9C4EBD",
 };
 
 export default function OverviewScreen() {
   const router = useRouter();
   const { summary, categories, isSyncing, refreshAll } = usePoints();
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     refreshAll();
   }, [refreshAll]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await refreshAll();
+    setTimeout(() => setRefreshing(false), 500);
+  };
 
   // Compute dynamic segments from real categories
   const segments: ChartSegment[] = categories
@@ -85,27 +94,35 @@ export default function OverviewScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 110 }}
         className="px-5 pt-2"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing || isSyncing}
+            onRefresh={onRefresh}
+            tintColor="#02EFF4"
+            colors={["#00A3FF", "#1845C8"]}
+          />
+        }
       >
         {/* Section Heading: Points Overview */}
         <Text
           style={{ fontFamily: "PlusJakartaSans-Bold" }}
-          className="text-[16px] text-[#111019] font-bold mb-3 ml-0.5"
+          className="text-base text-dark mb-3 ml-0.5"
         >
           Points Overview
         </Text>
 
         {/* Top Summary Card (Total number & Redeem this month) */}
-        <View className="w-full bg-[#F0FAFE] border border-[#DCF0FA] rounded-2xl p-4.5 flex-row justify-between mb-5 shadow-sm">
+        <View className="w-full bg-[#F0FAFE] border border-[#DCF0FA] rounded-2xl p-5 flex-row justify-between mb-5 shadow-sm">
           <View>
             <Text
               style={{ fontFamily: "PlusJakartaSans-Bold" }}
-              className="text-[22px] text-[#111019] font-bold tracking-tight mb-0.5"
+              className="text-2xl text-dark tracking-tight mb-0.5"
             >
               {totalDisplay.toLocaleString()}
             </Text>
             <Text
               style={{ fontFamily: "PlusJakartaSans-Regular" }}
-              className="text-[12.5px] text-[#7E7D8A]"
+              className="text-xs text-muted"
             >
               Total number
             </Text>
@@ -114,13 +131,13 @@ export default function OverviewScreen() {
           <View className="items-end">
             <Text
               style={{ fontFamily: "PlusJakartaSans-Bold" }}
-              className="text-[22px] text-[#111019] font-bold tracking-tight mb-0.5"
+              className="text-2xl text-dark tracking-tight mb-0.5"
             >
               {redeemedDisplay.toLocaleString()}
             </Text>
             <Text
               style={{ fontFamily: "PlusJakartaSans-Regular" }}
-              className="text-[12.5px] text-[#7E7D8A]"
+              className="text-xs text-muted"
             >
               Redeem this month
             </Text>

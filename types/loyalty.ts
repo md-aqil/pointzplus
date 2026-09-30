@@ -23,6 +23,9 @@ export interface LinkedAccount {
   expiryDate: string | null; // ISO date or display string
   lastSyncedAt: string; // ISO timestamp
   syncMethod: "manual" | "email_parser" | "sms" | "api";
+  sourceSubject?: string | null;
+  sourceSender?: string | null;
+  extractionSource?: string | null;
   isActive: boolean;
 }
 

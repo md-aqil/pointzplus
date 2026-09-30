@@ -174,6 +174,18 @@ class ApiClient {
     }
   }
 
+  async logout() {
+    try {
+      return await this.request<{ message: string }>('/auth/logout', {
+        method: 'POST',
+      });
+    } catch {
+      return null;
+    } finally {
+      this.clearToken();
+    }
+  }
+
   /** Permanently delete the signed-in user's account and all linked data. */
   async deleteCurrentUser() {
     return this.request<{ message: string }>('/auth/account', {
@@ -378,6 +390,21 @@ class ApiClient {
         body: JSON.stringify(alert),
       }
     );
+  }
+
+  // ─── Deals & Coupons ──────────────────────────────────
+  async getDeals(params?: { category?: string; q?: string; type?: string; featured?: boolean }) {
+    const search = new URLSearchParams();
+    if (params?.category && params.category !== 'all') search.set('category', params.category);
+    if (params?.q) search.set('q', params.q);
+    if (params?.type) search.set('type', params.type);
+    if (params?.featured) search.set('featured', 'true');
+    const qs = search.toString();
+    return this.request<{ total: number; deals: any[] }>(`/deals${qs ? `?${qs}` : ''}`);
+  }
+
+  async getDealCategories() {
+    return this.request<{ id: string; name: string; icon: string }[]>('/deals/categories');
   }
 }
 

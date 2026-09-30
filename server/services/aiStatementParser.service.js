@@ -9,7 +9,12 @@ import crypto from 'crypto';
 import { StatementParser } from './statementParser.js';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
+const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
+const NVIDIA_MODEL = process.env.NVIDIA_MODEL || 'deepseek-ai/deepseek-v4.1-flash';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
 const CATEGORY_COLORS = {
   airlines: '#01A2FB',
@@ -106,6 +111,7 @@ export class AIStatementParser {
     bodyText = '',
     bodyHtml = '',
     receivedDate = new Date().toISOString(),
+    pdfAttachments = [],
   }) {
     const messageIdHash = StatementParser.generateMessageHash(
       messageId,
@@ -114,8 +120,46 @@ export class AIStatementParser {
       receivedDate
     );
 
-    // 1. If AI credentials are present, attempt AI extraction
-    if (GEMINI_API_KEY || OPENAI_API_KEY) {
+    // 1. Fast-Path: Deterministic rule-based and heuristic parsing (0ms, zero rate limits)
+    // If there are no binary PDF attachments, deterministic rules handle statements instantly.
+    if (pdfAttachments.length === 0) {
+      const ruleResult = StatementParser.parseEmail({
+        messageId,
+        fromHeader,
+        subjectHeader,
+        bodyText,
+        bodyHtml,
+        receivedDate,
+      });
+
+      if (ruleResult.isLoyaltyStatement && ruleResult.loyaltyData) {
+        return {
+          messageIdHash,
+          isLoyaltyStatement: true,
+          source: 'rule_parser',
+          loyaltyData: ruleResult.loyaltyData,
+        };
+      }
+    }
+
+    // 2. Candidate Gating: If not matched by regex and no PDF, only call LLM if email has loyalty signals
+    const combinedText = `${subjectHeader} ${bodyText} ${bodyHtml.replace(/<[^>]+>/g, ' ')}`.toLowerCase();
+    const hasCandidateSignals =
+      pdfAttachments.length > 0 ||
+      /(?:points|miles|neucoins|supercoins|rewards|reward|statement|balance|qmiles|avios|cashback|flyerbonus|bluchip|loyalty)/i.test(
+        combinedText
+      );
+
+    if (!hasCandidateSignals) {
+      return {
+        messageIdHash,
+        isLoyaltyStatement: false,
+        loyaltyData: null,
+      };
+    }
+
+    // 3. If AI credentials are present, attempt AI structured extraction (including PDFs)
+    if (GEMINI_API_KEY || OPENROUTER_API_KEY || OPENAI_API_KEY || DEEPSEEK_API_KEY) {
       try {
         const aiResult = await this.extractWithAI({
           fromHeader,
@@ -123,16 +167,12 @@ export class AIStatementParser {
           bodyText,
           bodyHtml,
           receivedDate,
+          pdfAttachments,
         });
 
         if (aiResult && aiResult.is_loyalty_statement && typeof aiResult.current_balance === 'number') {
-          // Sanity check numeric value: reject phone numbers, OTPs, tracking IDs
           const balance = Math.round(aiResult.current_balance);
           if (balance >= 0 && balance < 50_000_000) {
-            // The model is asked for a category, but its vocabulary drifts from
-            // the one the app can actually render (it likes "supermarket"/"travel").
-            // Map anything unrecognised to 'other' rather than storing a value no
-            // component knows how to label.
             const category = CATEGORY_ALIASES[aiResult.category] || 'shopping';
             const programName = aiResult.program_name || aiResult.brand_name || 'Loyalty Program';
 
@@ -147,7 +187,7 @@ export class AIStatementParser {
             return {
               messageIdHash,
               isLoyaltyStatement: true,
-              source: 'ai_extractor',
+              source: pdfAttachments.length > 0 ? 'ai_pdf_extractor' : 'ai_extractor',
               loyaltyData: {
                 programId: (aiResult.brand_name || 'program')
                   .toLowerCase()
@@ -156,10 +196,6 @@ export class AIStatementParser {
                 brandName: aiResult.brand_name || programName,
                 category,
                 accentColor: CATEGORY_COLORS[category] || '#01A2FB',
-                // Deliberately NOT taken from the model. point_value_inr drives
-                // portfolio value in INR, and a hallucinated estimate would
-                // silently corrupt it. Use the conservative default and let a
-                // human correct it via the catalogue.
                 pointValueINR: DEFAULT_POINT_VALUE_INR,
                 balance,
                 accountNumber: aiResult.membership_id || 'MEMBER-***',
@@ -176,54 +212,62 @@ export class AIStatementParser {
       }
     }
 
-    // 2. Fallback to deterministic regex-based rules parser
-    const ruleResult = StatementParser.parseEmail({
-      messageId,
-      fromHeader,
-      subjectHeader,
-      bodyText,
-      bodyHtml,
-      receivedDate,
-    });
-
     return {
-      ...ruleResult,
-      source: 'rule_parser',
+      messageIdHash,
+      isLoyaltyStatement: false,
+      loyaltyData: null,
     };
   }
 
   /**
-   * LLM Extraction using Gemini API or OpenAI API
+   * LLM Extraction using Gemini API (with multimodal PDF support), OpenAI API, or DeepSeek API
    */
-  static async extractWithAI({ fromHeader, subjectHeader, bodyText, bodyHtml, receivedDate }) {
+  static async extractWithAI({ fromHeader, subjectHeader, bodyText, bodyHtml, receivedDate, pdfAttachments = [] }) {
     const cleanBody = (bodyText || bodyHtml.replace(/<[^>]+>/g, ' '))
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 2500);
 
-    const prompt = `You are a precision loyalty rewards and points parser.
-Analyze this email to determine if it is a genuine loyalty points/miles statement or balance notification.
+    const hasPdfs = Array.isArray(pdfAttachments) && pdfAttachments.length > 0;
+    const attachmentNote = hasPdfs
+      ? `\nAttached Files: ${pdfAttachments.map((p) => p.filename || 'statement.pdf').join(', ')} (Please analyze the attached PDF statement content for points balances, account IDs, and expiry dates).`
+      : '';
+
+    const prompt = `You are a precision loyalty rewards, air miles, and points parser.
+Analyze this email ${hasPdfs ? 'and its attached statement document(s)' : ''} to extract loyalty balances and reward updates in any format.
 
 Email Metadata:
 From: ${fromHeader}
 Subject: ${subjectHeader}
-Received Date: ${receivedDate}
+Received Date: ${receivedDate}${attachmentNote}
 
-Email Content Snippet:
+Email Content:
 """
-${cleanBody}
+${cleanBody || '(See attached PDF document)'}
 """
 
-Rules:
-1. Extract points only from real loyalty programs (airlines, hotels, credit cards, retail points, SuperCoins, dining coins, miles).
-2. DO NOT confuse fiat monetary transactions (e.g. ₹500 paid, $20 spent), bank account numbers, OTP codes, shipment tracking IDs, or order numbers as loyalty points.
-3. If no loyalty points balance is present in this email, return "is_loyalty_statement": false.
+Instructions & Loyalty Formats to Recognize:
+1. RECOGNIZE ALL REWARD UNITS:
+   - Points: "Reward Points", "Available Points", "Closing Balance", "i-Points", "EDGE Rewards", "Pts", "RP", "Bonus Points"
+   - Miles: "Air Miles", "Flying Returns", "KrisFlyer Miles", "CV Points", "InterMiles", "Avios", "SkyMiles", "Club Premier"
+   - Coins / Tokens: "SuperCoins", "NeuCoins", "CRED Coins", "Zomato Coins", "Cleartrip Coins", "Reward Coins"
+   - Stars: "Starbucks Stars", "Reward Stars"
+   - Loyalty Credits & Cashback Points: "Myntra Insider Points", "Swiggy One Rewards", "Fuel Points" (IOCL XtraRewards, BPCL PetroMiles)
+2. FORMAT FLEXIBILITY:
+   - Statements can present balances as:
+     • Explicit labels: "Current Balance: 12,450 pts", "Available NeuCoins: 1,420"
+     • Subject line alerts: "450 SuperCoins credited to your wallet", "You've earned 250 Stars!"
+     • Currency equivalents: "NeuCoins: ₹1,420", "Reward Balance: 8,400 (Value: ₹2,100)" -> extract the numeric coin/point count (1420 or 8400)
+     • Summary tables: "Opening: 1000, Earned: 500, Redeemed: 0, Closing: 1500" -> extract Closing/Available balance (1500)
+3. DISTINGUISH FIAT TRANSACTIONS:
+   - DO NOT extract bank account debit amounts (e.g. "₹5,000 debited from A/c XX1234"), OTP codes, bill payment amounts, or courier tracking numbers as points.
+4. If no genuine loyalty points balance or statement is present in this email/PDF, return "is_loyalty_statement": false.
 
 Respond ONLY with valid JSON conforming to this schema:
 {
   "is_loyalty_statement": boolean,
-  "brand_name": string (e.g. "Flipkart", "Air India", "InterMiles", "Myntra", "Marriott", "Axis Bank", "Tata Neu"),
-  "program_name": string (e.g. "SuperCoins", "Flying Returns", "EDGE Rewards", "NeuCoins"),
+  "brand_name": string (e.g. "Flipkart", "Air India", "InterMiles", "Myntra", "Marriott", "HDFC Bank", "ICICI Bank", "SBI Card", "Axis Bank", "Tata Neu", "Starbucks", "CRED", "Vistara"),
+  "program_name": string (e.g. "SuperCoins", "Flying Returns", "EDGE Rewards", "NeuCoins", "Starbucks Rewards", "CRED Coins", "Regalia Reward Points"),
   "category": "airlines" | "hotels" | "banking" | "shopping" | "dining" | "fuel" | "supermarket" | "entertainment" | "travel" | "other",
   "current_balance": integer (>= 0),
   "expiring_points": integer (>= 0),
@@ -233,22 +277,48 @@ Respond ONLY with valid JSON conforming to this schema:
   "confidence_score": number (0.0 to 1.0)
 }`;
 
+    // Priority routing: Gemini (native PDF) -> NVIDIA DeepSeek -> OpenRouter (free/byok) -> OpenAI -> DeepSeek
     if (GEMINI_API_KEY) {
-      return this.callGemini(prompt);
+      return this.callGemini(prompt, pdfAttachments);
+    } else if (NVIDIA_API_KEY) {
+      return this.callNvidiaDeepSeek(prompt, pdfAttachments);
+    } else if (OPENROUTER_API_KEY) {
+      return this.callOpenRouter(prompt);
     } else if (OPENAI_API_KEY) {
       return this.callOpenAI(prompt);
+    } else if (DEEPSEEK_API_KEY) {
+      return this.callDeepSeek(prompt);
     }
     return null;
   }
 
-  static async callGemini(prompt) {
+  static async callGemini(prompt, pdfAttachments = []) {
     const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+
+    const parts = [];
+
+    // Multimodal PDF Ingestion
+    if (Array.isArray(pdfAttachments)) {
+      for (const pdf of pdfAttachments.slice(0, 3)) {
+        if (pdf.base64Data) {
+          parts.push({
+            inline_data: {
+              mime_type: 'application/pdf',
+              data: pdf.base64Data,
+            },
+          });
+        }
+      }
+    }
+
+    parts.push({ text: prompt });
+
     const response = await callProvider('Gemini', url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts }],
         generationConfig: {
           response_mime_type: 'application/json',
           temperature: 0.1,
@@ -262,6 +332,72 @@ Respond ONLY with valid JSON conforming to this schema:
     return JSON.parse(candidateText);
   }
 
+  static async callNvidiaDeepSeek(prompt, pdfAttachments = []) {
+    const url = `${NVIDIA_BASE_URL.replace(/\/+$/, '')}/chat/completions`;
+    const response = await callProvider('NvidiaDeepSeek', url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${NVIDIA_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: NVIDIA_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+      }),
+    });
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return null;
+
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    return JSON.parse(match[0]);
+  }
+
+  static async callOpenRouter(prompt) {
+    const candidateModels = [
+      process.env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-lite:free',
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'qwen/qwen-2.5-72b-instruct:free',
+      'openrouter/free',
+    ];
+    const url = 'https://openrouter.ai/api/v1/chat/completions';
+
+    for (const model of candidateModels) {
+      try {
+        const response = await fetchWithTimeout(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+            'HTTP-Referer': 'https://pointzplus.app',
+            'X-Title': 'PointzPlus',
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.1,
+          }),
+        }, 8000);
+
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content;
+        if (!content) continue;
+
+        const match = content.match(/\{[\s\S]*\}/);
+        if (!match) continue;
+        return JSON.parse(match[0]);
+      } catch {
+        // try next candidate model
+      }
+    }
+    return null;
+  }
+
   static async callOpenAI(prompt) {
     const url = 'https://api.openai.com/v1/chat/completions';
     const response = await callProvider('OpenAI', url, {
@@ -272,6 +408,28 @@ Respond ONLY with valid JSON conforming to this schema:
       },
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+      }),
+    });
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return null;
+    return JSON.parse(content);
+  }
+
+  static async callDeepSeek(prompt) {
+    const url = 'https://api.deepseek.com/chat/completions';
+    const response = await callProvider('DeepSeek', url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
         temperature: 0.1,

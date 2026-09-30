@@ -239,4 +239,5 @@ export const CATEGORY_LABELS: Record<string, { name: string; icon: string; color
   telecom: { name: "Telecom", icon: "Radio", color: "#070617", bgColor: "#F5FEFF" },
   groceries: { name: "Groceries", icon: "ShoppingCart", color: "#10B981", bgColor: "#ECFDF5" },
   travel: { name: "Travel & Tours", icon: "Compass", color: "#8B5CF6", bgColor: "#F5F3FF" },
+  other: { name: "Growth & Other", icon: "Layers", color: "#9C4EBD", bgColor: "#FDF4FF" },
 };

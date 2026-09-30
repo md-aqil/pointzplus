@@ -64,6 +64,9 @@ function mapBackendAccount(a: BackendLinkedAccount): LinkedAccount {
     expiryDate: a.expiry_date,
     lastSyncedAt: a.last_synced_at || new Date().toISOString(),
     syncMethod: (a.sync_method || "manual") as LinkedAccount["syncMethod"],
+    sourceSubject: a.source_subject || null,
+    sourceSender: a.source_sender || null,
+    extractionSource: a.extraction_source || null,
     isActive: a.is_active ?? true,
   };
 }
@@ -149,6 +152,7 @@ interface PointsState {
   fetchNotificationsFromBackend: () => Promise<void>;
   acknowledgeNotification: (id: string) => Promise<void>;
   refreshAll: () => Promise<void>;
+  reset: () => void;
 }
 
 function notificationDateGroup(value: string): string {
@@ -531,5 +535,17 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     } finally {
       set({ isSyncing: false });
     }
+  },
+
+  reset: () => {
+    set({
+      accounts: [],
+      emailAccounts: [],
+      transactions: [],
+      notifications: [],
+      isSyncing: false,
+      syncProgress: { step: "Ready", percent: 0 },
+      monthlyFlows: null,
+    });
   },
 }));
