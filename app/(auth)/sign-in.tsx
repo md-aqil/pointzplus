@@ -70,7 +70,7 @@ export default function SignInScreen() {
             flexGrow: 1,
             paddingHorizontal: 24,
             paddingTop: 12,
-            paddingBottom: 24,
+            paddingBottom: Platform.OS === "web" ? 44 : 24,
             justifyContent: "space-between",
           }}
           showsVerticalScrollIndicator={false}

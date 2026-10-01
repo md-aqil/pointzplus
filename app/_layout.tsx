@@ -1,7 +1,7 @@
 // app/_layout.tsx – Root layout with custom fonts, safe areas & providers
 import "../global.css";
 import React, { useEffect, useRef } from "react";
-import { View, Platform } from "react-native";
+import { View, Platform, useWindowDimensions } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -142,45 +142,64 @@ export default function RootLayout() {
     </Stack>
   );
 
+  const { width } = useWindowDimensions();
+  const isDesktopWeb = Platform.OS === "web" && width > 500;
+
   return (
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
         {Platform.OS === "web" ? (
-          <View
-            style={{
-              position: "fixed" as any,
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: "100vh" as any,
-              width: "100vw" as any,
-              backgroundColor: "#070617",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-            }}
-          >
+          isDesktopWeb ? (
             <View
               style={{
-                width: "100%",
-                maxWidth: 393,
-                height: "100%",
-                maxHeight: "min(852px, 100vh)" as any,
-                backgroundColor: "#F5FEFF",
-                shadowColor: "#000000",
-                shadowOffset: { width: 0, height: 10 },
-                shadowOpacity: 0.35,
-                shadowRadius: 25,
+                position: "fixed" as any,
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: "100vh" as any,
+                width: "100vw" as any,
+                backgroundColor: "#070617",
+                alignItems: "center",
+                justifyContent: "center",
                 overflow: "hidden",
-                position: "relative",
+              }}
+            >
+              <View
+                style={{
+                  width: "100%",
+                  maxWidth: 393,
+                  height: "100%",
+                  maxHeight: "min(852px, 100dvh)" as any,
+                  backgroundColor: "#F5FEFF",
+                  shadowColor: "#000000",
+                  shadowOffset: { width: 0, height: 10 },
+                  shadowOpacity: 0.35,
+                  shadowRadius: 25,
+                  overflow: "hidden",
+                  position: "relative",
+                  display: "flex" as any,
+                  flexDirection: "column",
+                }}
+              >
+                {stackContent}
+              </View>
+            </View>
+          ) : (
+            <View
+              style={{
+                flex: 1,
+                width: "100%",
+                height: "100%",
+                minHeight: "100dvh" as any,
+                backgroundColor: "#F5FEFF",
                 display: "flex" as any,
                 flexDirection: "column",
               }}
             >
               {stackContent}
             </View>
-          </View>
+          )
         ) : (
           stackContent
         )}
