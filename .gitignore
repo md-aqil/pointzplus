@@ -35,6 +35,7 @@ yarn-error.*
 .env
 .env.*
 !.env.example
+!.env.docker.example
 server/.env
 server/.env.*
 !server/.env.example

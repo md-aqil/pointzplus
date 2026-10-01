@@ -20,6 +20,13 @@ function resolveApiBase(): string {
 
   // 2. Web browser: use the current browser hostname
   if (Platform.OS === 'web') {
+    // Behind the Caddy proxy (no dev port) the API shares the page's origin.
+    if (
+      typeof window !== 'undefined' &&
+      window.location?.hostname.endsWith('.vibeship.in')
+    ) {
+      return `${window.location.origin}/api`;
+    }
     const host =
       typeof window !== 'undefined' && window.location?.hostname
         ? window.location.hostname

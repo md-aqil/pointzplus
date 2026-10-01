@@ -1,0 +1,12 @@
+node_modules
+.expo
+dist
+logs
+.git
+server
+web
+.env
+.env.*
+!.env.example
+*.png
+!assets/**

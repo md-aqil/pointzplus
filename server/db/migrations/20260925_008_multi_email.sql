@@ -12,9 +12,18 @@
 ALTER TABLE public.email_sync_accounts
   DROP CONSTRAINT IF EXISTS email_sync_accounts_user_id_provider_key;
 
-ALTER TABLE public.email_sync_accounts
-  ADD CONSTRAINT email_sync_accounts_user_provider_email_key
-  UNIQUE (user_id, provider, email_address);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'email_sync_accounts_user_provider_email_key'
+      AND conrelid = 'public.email_sync_accounts'::regclass
+  ) THEN
+    ALTER TABLE public.email_sync_accounts
+      ADD CONSTRAINT email_sync_accounts_user_provider_email_key
+      UNIQUE (user_id, provider, email_address);
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_email_sync_user_provider
   ON public.email_sync_accounts(user_id, provider);

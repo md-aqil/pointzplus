@@ -1,0 +1,111 @@
+# PointzPlus backend stack: PostgreSQL + migrations + Express API.
+# The Expo app still runs on the host (npx expo start) and talks to the API.
+#
+#   cp .env.docker.example .env   # then set JWT_SECRET
+#   docker compose up -d --build
+services:
+  db:
+    networks:
+      - backend
+    image: postgres:18-alpine
+    restart: unless-stopped
+    container_name: pointzplus_data
+    environment:
+      POSTGRES_DB: ${DB_NAME:-pointzplus}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: applies every migration in order on each `up` (they are idempotent).
+  migrate:
+    networks:
+      - backend
+    image: postgres:18-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGDATABASE: ${DB_NAME:-pointzplus}
+      PGUSER: ${DB_USER:-postgres}
+      PGPASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - ./server/db/migrations:/migrations:ro
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        for f in /migrations/*.sql; do
+          echo "applying $$f"
+          psql -v ON_ERROR_STOP=1 -q -f "$$f"
+        done
+    restart: "no"
+
+  api:
+    networks:
+      - backend
+      - frontend
+      - vibeship
+    build: ./server
+    container_name: pointzplus_api
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      PORT: 3001
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-pointzplus}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (openssl rand -hex 32)}
+      SYNC_WORKER_ENABLED: ${SYNC_WORKER_ENABLED:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://pointzplus.vibeship.in,http://pointzplus.vibeship.in,http://localhost:8081}
+    env_file:
+      - path: ./server/.env
+        required: false
+
+  # Expo app (web + Metro bundler). Source is mounted for hot reload.
+  app:
+    networks:
+      - frontend
+      - vibeship
+    build: .
+    container_name: pointzplus_app
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      EXPO_NO_TELEMETRY: "1"
+      EXPO_PUBLIC_DEBUG: "true"
+      # Native devices can't reach "localhost"; set to http://<LAN-IP>:3001/api.
+      # Left empty, the web build derives the API from the browser hostname.
+      EXPO_PUBLIC_API_URL: ${EXPO_PUBLIC_API_URL:-}
+      # LAN IP advertised in the QR code for Expo Go (optional).
+      REACT_NATIVE_PACKAGER_HOSTNAME: ${REACT_NATIVE_PACKAGER_HOSTNAME:-}
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+volumes:
+  postgres:
+
+# backend:  db <-> migrate <-> api   (database is never reachable from the app)
+# frontend: api <-> app
+# vibeship: shared external network (api + app only) for other projects/proxy
+networks:
+  backend:
+    name: pointzplus-backend
+  frontend:
+    name: pointzplus-frontend
+  vibeship:
+    external: true
