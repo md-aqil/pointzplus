@@ -1,5 +1,5 @@
 // app/email-sync.tsx – Google Gmail OAuth Auto-Sync Screen
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -10,8 +10,9 @@ import {
   Linking,
   AppState,
   Alert,
+  Platform,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   ArrowLeft,
@@ -19,6 +20,7 @@ import {
   ShieldCheck,
   RefreshCw,
   CheckCircle2,
+  AlertCircle,
   Lock,
   Zap,
 } from "lucide-react-native";
@@ -31,12 +33,28 @@ import { MailboxCard } from "../components/ui/MailboxCard";
 
 export default function EmailSyncScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ connected?: string }>();
   const { user } = useAuth();
   const { emailAccounts, syncEmail, isSyncing, syncProgress, disconnectEmail } = usePoints();
   const fetchAccountsFromBackend = usePointsStore((s) => s.fetchAccountsFromBackend);
   const [syncSuccessModal, setSyncSuccessModal] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [syncedCount, setSyncedCount] = useState(0);
   const [isConnecting, setIsConnecting] = useState(false);
+  const autoScannedAccountsRef = useRef<Set<string>>(new Set());
+  const lastDetectionsCountRef = useRef(0);
+
+  // Trigger micro-haptics when new loyalty programs are discovered in real time
+  useEffect(() => {
+    const currentCount = syncProgress.liveDetections?.length || 0;
+    if (currentCount > lastDetectionsCountRef.current) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      lastDetectionsCountRef.current = currentCount;
+    }
+    if (!isSyncing) {
+      lastDetectionsCountRef.current = 0;
+    }
+  }, [syncProgress.liveDetections, isSyncing]);
 
   // A user may link several mailboxes, so the UI works with a list.
   const gmailAccounts = emailAccounts.filter(
@@ -56,24 +74,37 @@ export default function EmailSyncScreen() {
     return () => sub.remove();
   }, [fetchAccountsFromBackend]);
 
+  // Automatically start scan on newly connected mailboxes that haven't been scanned yet
+  useEffect(() => {
+    if (isSyncing || gmailAccounts.length === 0) return;
+
+    for (const account of gmailAccounts) {
+      if (!account.lastSyncAt && !autoScannedAccountsRef.current.has(account.id)) {
+        autoScannedAccountsRef.current.add(account.id);
+        console.log("[EmailSync] Auto-starting scan for newly connected mailbox:", account.email);
+        handleStartSync(account.email);
+        break;
+      }
+    }
+  }, [gmailAccounts, isSyncing]);
+
   const handleConnectGmail = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsConnecting(true);
+    setSyncError(null);
     try {
       const res = await apiClient.getEmailAuthUrl("google");
       if (res?.url) {
         await Linking.openURL(res.url);
       } else {
-        Alert.alert(
-          "OAuth Configuration Required",
-          "Google OAuth credentials must be set in server/.env (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)."
-        );
+        const msg = "Google OAuth credentials must be set in server/.env (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).";
+        setSyncError(msg);
+        Alert.alert("OAuth Configuration Required", msg);
       }
     } catch (err: any) {
-      Alert.alert(
-        "Connection Error",
-        err?.message || "Could not retrieve Google Sign-In URL. Please verify server connectivity."
-      );
+      const msg = err?.message || "Could not retrieve Google Sign-In URL. Please verify server connectivity.";
+      setSyncError(msg);
+      Alert.alert("Connection Error", msg);
     } finally {
       setIsConnecting(false);
     }
@@ -81,16 +112,18 @@ export default function EmailSyncScreen() {
 
   const handleStartSync = async (email: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSyncError(null);
+    console.log("[EmailSync] Starting Gmail scan for:", email);
     try {
       const results = await syncEmail("gmail", email);
+      console.log("[EmailSync] Scan finished successfully with results count:", results.length);
       setSyncedCount(results.length);
       setSyncSuccessModal(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
-      Alert.alert(
-        "Sync Failed",
-        e?.message || "Failed to extract data from Gmail. Please reconnect your account and try again."
-      );
+      console.error("[EmailSync] Scan failed:", e);
+      const errMsg = e?.message || "Failed to extract data from Gmail. Please reconnect your account and try again.";
+      setSyncError(errMsg);
     }
   };
 
@@ -127,80 +160,162 @@ export default function EmailSyncScreen() {
         contentContainerStyle={{ paddingBottom: 60 }}
         className="px-5 pt-4"
       >
-        {/* Value Proposition Hero Banner */}
-        <View className="bg-dark rounded-3xl p-5 mb-5 overflow-hidden relative shadow-md">
-          <View className="flex-row items-center mb-2">
-            <View className="w-8 h-8 rounded-full bg-primary/20 items-center justify-center mr-2">
-              <Zap size={16} color="#02EFF4" />
+        {/* Subtle, Low-Profile Info Bar */}
+        <View className="bg-sky-50/60 border border-sky-100 rounded-2xl p-3.5 mb-4 flex-row items-center justify-between">
+          <View className="flex-row items-center flex-1 mr-2">
+            <View className="w-8 h-8 rounded-xl bg-[#00A3FF]/10 items-center justify-center mr-2.5">
+              <Zap size={15} color="#00A3FF" />
             </View>
+            <View className="flex-1">
+              <Text
+                style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                className="text-[12px] text-slate-800"
+              >
+                Auto-Statement Detection
+              </Text>
+              <Text
+                style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                className="text-[11px] text-slate-500 leading-4"
+              >
+                Scans official reward e-statements via secure read-only access.
+              </Text>
+            </View>
+          </View>
+          <View className="flex-row items-center bg-white px-2 py-1 rounded-lg border border-slate-200/60 shadow-2xs">
+            <Lock size={11} color="#059669" />
             <Text
               style={{ fontFamily: "PlusJakartaSans-Bold" }}
-              className="text-xs text-primary uppercase tracking-wider"
+              className="text-[10px] text-emerald-700 ml-1"
             >
-              Automated Gmail Extraction
-            </Text>
-          </View>
-
-          <Text
-            style={{ fontFamily: "PlusJakartaSans-Bold" }}
-            className="text-xl text-white mb-2 leading-6"
-          >
-            Auto-Detect Points from Statements & Receipts
-          </Text>
-
-          <Text
-            style={{ fontFamily: "PlusJakartaSans-Regular" }}
-            className="text-xs text-white/70 leading-4 mb-4"
-          >
-            Connect your Gmail via Google OAuth. PointzPlus automatically scans for official e-statements from airlines, hotels, banking rewards & retail brands to keep your portfolio up to date.
-          </Text>
-
-          <View className="flex-row items-center bg-white/10 px-3 py-2 rounded-xl">
-            <Lock size={14} color="#02EFF4" />
-            <Text
-              style={{ fontFamily: "PlusJakartaSans-Medium" }}
-              className="text-[11px] text-white/90 ml-2"
-            >
-              Read-only statement access. Personal emails are never read.
+              Secure
             </Text>
           </View>
         </View>
 
-        {/* Sync Status / Live Progress Card if Syncing */}
+        {/* Live Dopamine Sync & Discovery Stream */}
         {isSyncing && (
-          <View className="bg-white rounded-2xl p-4 mb-5 border border-primary/40 shadow-sm">
+          <View className="bg-white rounded-3xl p-5 mb-5 border-2 border-[#00A3FF]/30 shadow-md">
+            {/* Header: Status & Live Percentage */}
             <View className="flex-row items-center justify-between mb-3">
               <View className="flex-row items-center">
-                <ActivityIndicator size="small" color="#01A2FB" className="mr-2" />
+                <ActivityIndicator size="small" color="#00A3FF" className="mr-2" />
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-sm text-dark"
+                  className="text-sm text-slate-900"
                 >
-                  Syncing Gmail Statements...
+                  Scanning Statements...
                 </Text>
               </View>
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-xs text-primary-dark"
-              >
-                {syncProgress.percent}%
-              </Text>
+              <View className="bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-xs text-[#00A3FF]"
+                >
+                  {syncProgress.percent}%
+                </Text>
+              </View>
             </View>
 
             {/* Progress Bar */}
-            <View className="w-full bg-border-light h-2 rounded-full overflow-hidden mb-2">
+            <View className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden mb-2.5">
               <View
-                style={{ width: `${syncProgress.percent}%` }}
-                className="bg-primary-dark h-full rounded-full"
+                style={{ width: `${Math.max(5, syncProgress.percent)}%` }}
+                className="bg-[#00A3FF] h-full rounded-full"
               />
             </View>
 
             <Text
               style={{ fontFamily: "PlusJakartaSans-Medium" }}
-              className="text-xs text-dark-muted"
+              className="text-xs text-slate-500 mb-3.5"
             >
               {syncProgress.step}
             </Text>
+
+            {/* Live Rolling Total Points Counter */}
+            {(syncProgress.totalPointsDiscovered ?? 0) > 0 && (
+              <View className="bg-[#00A3FF] rounded-2xl p-3.5 mb-3 flex-row items-center justify-between shadow-sm">
+                <View className="flex-row items-center">
+                  <Text className="text-xl mr-2.5">✨</Text>
+                  <View>
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Medium" }}
+                      className="text-[11px] text-white/80 uppercase tracking-wider"
+                    >
+                      Found So Far
+                    </Text>
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                      className="text-lg text-white"
+                    >
+                      +{(syncProgress.totalPointsDiscovered ?? 0).toLocaleString()} points
+                    </Text>
+                  </View>
+                </View>
+                <View className="bg-white/20 px-2.5 py-1 rounded-full border border-white/30">
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-[11px] text-white"
+                  >
+                    {syncProgress.liveDetections?.length ?? 0} programs
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Live Discovery Feed */}
+            {syncProgress.liveDetections && syncProgress.liveDetections.length > 0 && (
+              <View className="mt-1">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-[11px] text-slate-400 uppercase tracking-wider mb-2 ml-1"
+                >
+                  Live Discovery Stream
+                </Text>
+                {syncProgress.liveDetections.slice(-5).reverse().map((item, idx) => (
+                  <View
+                    key={`${item.programName}-${idx}`}
+                    className="bg-slate-50 border border-slate-200/70 rounded-2xl p-3 flex-row items-center justify-between mb-2"
+                  >
+                    <View className="flex-row items-center flex-1 mr-2">
+                      <View className="w-8 h-8 rounded-xl bg-sky-100 items-center justify-center mr-2.5">
+                        <Text className="text-sm">
+                          {item.category === "airlines"
+                            ? "✈️"
+                            : item.category === "banking"
+                            ? "💳"
+                            : item.category === "hotels"
+                            ? "🏨"
+                            : "🛍️"}
+                        </Text>
+                      </View>
+                      <View className="flex-1">
+                        <Text
+                          style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                          className="text-xs text-slate-900"
+                          numberOfLines={1}
+                        >
+                          {item.programName}
+                        </Text>
+                        <Text
+                          style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                          className="text-[10px] text-slate-400"
+                        >
+                          {item.accountNumber ? `${item.accountNumber} · ` : ""}Discovered
+                        </Text>
+                      </View>
+                    </View>
+                    <View className="bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200/70">
+                      <Text
+                        style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                        className="text-xs text-emerald-700"
+                      >
+                        +{Number(item.balance).toLocaleString()}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
@@ -223,6 +338,23 @@ export default function EmailSyncScreen() {
             onScan={() => handleStartSync(account.email)}
             onRemove={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              const doDisconnect = async () => {
+                await disconnectEmail(account.id);
+                await fetchAccountsFromBackend();
+              };
+
+              if (Platform.OS === "web") {
+                if (
+                  typeof window !== "undefined" &&
+                  window.confirm(
+                    `Disconnect mailbox?\n${account.email} will be removed. Points already tracked are kept.`
+                  )
+                ) {
+                  doDisconnect();
+                }
+                return;
+              }
+
               Alert.alert(
                 "Disconnect mailbox?",
                 `${account.email} will be removed. Points already tracked are kept.`,
@@ -231,10 +363,7 @@ export default function EmailSyncScreen() {
                   {
                     text: "Disconnect",
                     style: "destructive",
-                    onPress: () => {
-                      disconnectEmail(account.id);
-                      fetchAccountsFromBackend();
-                    },
+                    onPress: doDisconnect,
                   },
                 ]
               );
@@ -329,7 +458,7 @@ export default function EmailSyncScreen() {
       {/* Success Modal */}
       <Modal visible={syncSuccessModal} transparent animationType="fade">
         <View className="flex-1 bg-black/60 items-center justify-center px-6">
-          <View className="bg-white w-full rounded-3xl p-6 items-center shadow-xl">
+          <View className="bg-white w-full max-w-sm rounded-3xl p-6 items-center shadow-xl">
             <View className="w-16 h-16 rounded-full bg-emerald-100 items-center justify-center mb-4">
               <CheckCircle2 size={36} color="#059669" />
             </View>
@@ -362,6 +491,77 @@ export default function EmailSyncScreen() {
                 View Updated Dashboard
               </Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Error Modal */}
+      <Modal visible={Boolean(syncError)} transparent animationType="fade">
+        <View className="flex-1 bg-black/60 items-center justify-center px-6">
+          <View className="bg-white w-full max-w-sm rounded-3xl p-6 items-center shadow-xl">
+            <View className="w-16 h-16 rounded-full bg-red-100 items-center justify-center mb-4">
+              <AlertCircle size={36} color="#EF4444" />
+            </View>
+
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+              className="text-xl text-dark mb-2 text-center"
+            >
+              Gmail Sync Failed
+            </Text>
+
+            <Text
+              style={{ fontFamily: "PlusJakartaSans-Regular" }}
+              className="text-xs text-slate-600 text-center mb-4 leading-5"
+            >
+              {syncError}
+            </Text>
+
+            {syncError?.toLowerCase().includes("permission") && (
+              <View className="bg-sky-50 border border-sky-200 rounded-2xl p-3.5 mb-5 w-full">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-xs text-sky-900 mb-1"
+                >
+                  💡 How to resolve:
+                </Text>
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                  className="text-[11px] text-sky-800 leading-4"
+                >
+                  During Google Sign-In, make sure to <Text style={{ fontFamily: "PlusJakartaSans-Bold" }}>check the box</Text> for <Text style={{ fontStyle: "italic" }}>"View your email messages and settings"</Text> so PointzPlus can read statement emails.
+                </Text>
+              </View>
+            )}
+
+            <View className="flex-row w-full space-x-2.5">
+              <TouchableOpacity
+                onPress={() => setSyncError(null)}
+                className="flex-1 bg-slate-100 py-3.5 rounded-2xl items-center mr-2"
+              >
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-slate-700 text-xs"
+                >
+                  Dismiss
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  setSyncError(null);
+                  handleConnectGmail();
+                }}
+                className="flex-1 bg-[#00A3FF] py-3.5 rounded-2xl items-center"
+              >
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-white text-xs"
+                >
+                  Reconnect
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

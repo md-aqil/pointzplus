@@ -57,9 +57,9 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const displayName = user?.name || "md aqil";
-  const displayEmail = user?.email || "aqilali381@gmail.com";
-  const displayPhone = user?.phone || "+919041226707";
+  const displayName = user?.name || (user?.email ? user.email.split("@")[0] : "User");
+  const displayEmail = user?.email || "";
+  const displayPhone = user?.phone ? user.phone : "Add phone number";
 
   const connectedGmail =
     emailAccounts.find((a) => a.provider === "gmail" && a.status === "connected") ||

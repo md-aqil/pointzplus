@@ -187,6 +187,17 @@ export const EmailSyncRepo = {
     );
   },
 
+  findActiveJob(userId, accountId) {
+    return query(
+      `SELECT * FROM sync_jobs
+       WHERE user_id = $1 AND email_sync_account_id = $2
+         AND status IN ('queued', 'fetching', 'parsing')
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, accountId]
+    ).then((r) => r.rows[0] || null);
+  },
+
   /**
    * Atomically claim the oldest queued job for this worker.
    * FOR UPDATE SKIP LOCKED makes this safe with several API instances running
@@ -227,6 +238,19 @@ export const EmailSyncRepo = {
     return query(
       `UPDATE sync_jobs SET messages_processed = $2, locked_at = NOW() WHERE id = $1`,
       [jobId, processed]
+    );
+  },
+
+  /** Stream newly detected loyalty discovery immediately for live client dopamine feed. */
+  recordLiveDetection(jobId, detection, processed) {
+    return query(
+      `UPDATE sync_jobs
+       SET live_detections = COALESCE(live_detections, '[]'::jsonb) || $2::jsonb,
+           programs_updated = programs_updated + 1,
+           messages_processed = $3,
+           locked_at = NOW()
+       WHERE id = $1`,
+      [jobId, JSON.stringify([detection]), processed]
     );
   },
 

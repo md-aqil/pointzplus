@@ -8,7 +8,7 @@ import {
   CategorySummary,
   LoyaltyCategory,
 } from "../types/loyalty";
-import { NotificationItem, SyncJob, SyncJobStatus, BackendLinkedAccount } from "../types/models";
+import { NotificationItem, SyncJob, SyncJobStatus, LiveDetection, BackendLinkedAccount } from "../types/models";
 import { POPULAR_PROGRAMS, CATEGORY_LABELS } from "../constants/popularPrograms";
 import { apiClient } from "../lib/apiClient";
 import { notifyPointsEarned } from "../services/pushNotifications";
@@ -17,26 +17,44 @@ import { notifyPointsEarned } from "../services/pushNotifications";
 const SYNC_JOB_POLL_INTERVAL_MS = 2_000;
 const SYNC_JOB_TIMEOUT_MS = 10 * 60 * 1_000;
 
-type SyncProgress = { step: string; percent: number };
+export type SyncProgress = {
+  step: string;
+  percent: number;
+  liveDetections?: LiveDetection[];
+  totalPointsDiscovered?: number;
+};
 
 // During `parsing` the server reports how many messages it has handled, so the
 // bar tracks real work across the 80–92% band instead of animating blindly.
 const SYNC_JOB_PROGRESS: Partial<Record<SyncJobStatus, (job: SyncJob) => SyncProgress>> = {
-  queued: () => ({ step: "Scan queued – waiting for the sync worker...", percent: 30 }),
-  fetching: () => ({ step: "Searching your inbox for statements & promo tokens...", percent: 55 }),
+  queued: () => ({ step: "Scan queued – waiting for the sync worker...", percent: 30, liveDetections: [], totalPointsDiscovered: 0 }),
+  fetching: () => ({ step: "Searching your inbox for statements & promo tokens...", percent: 55, liveDetections: [], totalPointsDiscovered: 0 }),
   parsing: (job) => {
     const total = Number(job.total_messages_found) || 0;
     const done = Number(job.messages_processed) || 0;
     const ratio = total > 0 ? Math.min(1, done / total) : 0;
+    const liveDetections = job.live_detections || [];
+    const totalPoints = liveDetections.reduce((acc, d) => acc + (Number(d.balance) || 0), 0);
     return {
       step:
         total > 0
           ? `Extracting points (${done}/${total})…`
           : "Extracting points from matched emails...",
       percent: 80 + Math.round(ratio * 12),
+      liveDetections,
+      totalPointsDiscovered: totalPoints,
     };
   },
-  completed: () => ({ step: "Finalizing your portfolio...", percent: 92 }),
+  completed: (job) => {
+    const liveDetections = job?.live_detections || [];
+    const totalPoints = liveDetections.reduce((acc, d) => acc + (Number(d.balance) || 0), 0);
+    return {
+      step: "Finalizing your portfolio...",
+      percent: 95,
+      liveDetections,
+      totalPointsDiscovered: totalPoints,
+    };
+  },
 };
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -85,16 +103,21 @@ async function pollSyncJob(
     let job;
     try {
       job = await apiClient.getSyncJob(jobId);
-    } catch {
+    } catch (fetchErr: any) {
+      console.warn(`[pollSyncJob] Poll attempt failed for job ${jobId}:`, fetchErr?.message);
       // A transient network blip must not abandon a scan that is still running.
       await delay(SYNC_JOB_POLL_INTERVAL_MS);
       continue;
     }
 
+    console.log(`[pollSyncJob] Job ${jobId} status: ${job.status}, messages: ${job.messages_processed ?? 0}/${job.total_messages_found ?? 0}`);
+
     if (job.status === "failed") {
+      console.error(`[pollSyncJob] Job ${jobId} failed:`, job.error_details);
       throw new Error(job.error_details || "Gmail sync failed. Please try again.");
     }
     if (job.status === "completed") {
+      console.log(`[pollSyncJob] Job ${jobId} completed successfully!`);
       return job;
     }
 
@@ -102,6 +125,7 @@ async function pollSyncJob(
     await delay(SYNC_JOB_POLL_INTERVAL_MS);
   }
 
+  console.error(`[pollSyncJob] Job ${jobId} timed out after ${SYNC_JOB_TIMEOUT_MS}ms`);
   throw new Error("Gmail sync is taking longer than expected. Please try again shortly.");
 }
 
@@ -112,7 +136,7 @@ interface PointsState {
   transactions: PointsTransaction[];
   notifications: NotificationItem[];
   isSyncing: boolean;
-  syncProgress: { step: string; percent: number };
+  syncProgress: SyncProgress;
   /**
    * Current-month credit/debit totals as aggregated by the server.
    * Null until the first successful load, so the UI can tell "0 this month"
@@ -436,27 +460,30 @@ export const usePointsStore = create<PointsState>((set, get) => ({
   },
 
   syncEmail: async (provider, email, onProgressUpdate) => {
-    set({ isSyncing: true, syncProgress: { step: "Connecting to mailbox...", percent: 10 } });
+    set({
+      isSyncing: true,
+      syncProgress: { step: "Connecting to mailbox...", percent: 10, liveDetections: [], totalPointsDiscovered: 0 },
+    });
 
-    const handleProgress = (step: string, percent: number) => {
-      set({ syncProgress: { step, percent } });
-      onProgressUpdate?.(step, percent);
+    const handleProgress = (progress: SyncProgress) => {
+      set({ syncProgress: progress });
+      onProgressUpdate?.(progress.step, progress.percent);
     };
 
     try {
-      handleProgress("Queueing mailbox scan...", 25);
+      handleProgress({ step: "Queueing mailbox scan...", percent: 25, liveDetections: [], totalPointsDiscovered: 0 });
       // The Gmail fetch + parse runs server-side as a job. Queuing returns in
       // milliseconds, so the HTTP request never blocks the UI thread.
       const { jobId } = await apiClient.queueEmailScan(provider);
       const job = await pollSyncJob(jobId, (current) => {
         const phase = SYNC_JOB_PROGRESS[current.status];
         if (phase) {
-          const { step, percent } = phase(current);
-          handleProgress(step, percent);
+          const progress = phase(current);
+          handleProgress(progress);
         }
       });
 
-      handleProgress("Refreshing your portfolio...", 90);
+      handleProgress({ step: "Refreshing your portfolio...", percent: 90 });
       const previousBalances = new Map(
         get().accounts.map((a) => [a.programId, a.currentBalance])
       );
@@ -520,7 +547,9 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       // Fall through to the local update so the UI stays consistent.
     }
     set((state) => ({
-      emailAccounts: state.emailAccounts.filter((e) => e.id !== accountId),
+      emailAccounts: state.emailAccounts.filter(
+        (e) => e.id !== accountId && e.email !== accountId
+      ),
     }));
   },
 
