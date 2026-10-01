@@ -63,6 +63,7 @@ const queryClient = new QueryClient({
 });
 
 export default function RootLayout() {
+  const { width } = useWindowDimensions();
   const [fontsLoaded, fontError] = useFonts({
     "PlusJakartaSans-Regular": PlusJakartaSans_400Regular,
     "PlusJakartaSans-Medium": PlusJakartaSans_500Medium,
@@ -142,7 +143,6 @@ export default function RootLayout() {
     </Stack>
   );
 
-  const { width } = useWindowDimensions();
   const isDesktopWeb = Platform.OS === "web" && width > 500;
 
   return (
