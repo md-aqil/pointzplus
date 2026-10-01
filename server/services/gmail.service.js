@@ -117,28 +117,24 @@ export async function isAuthorizedPubSubRequest(req) {
   }
 }
 
-// ─── Gmail search & body helpers ─────────────────────────────────
+// Universal Loyalty & Statement Search Intent (Domain-Agnostic across Entire Mailbox)
+// Discovers all statements, reward summaries, coin updates, e-statements, points, miles,
+// frequent flyer balances, club programs, and receipts with rewards from ANY sender and across all time.
+export const UNIVERSAL_LOYALTY_QUERY = [
+  'subject:(points OR miles OR reward OR rewards OR statement OR balance OR cashback OR coin OR coins OR supercoins OR neucoins OR loyalty OR membership OR "frequent flyer" OR "e-statement" OR "account update" OR summary OR "points statement" OR "miles statement" OR "reward summary" OR "points balance" OR "tier status" OR "privilege" OR "rewards club")',
+  '(points OR miles OR rewards OR SuperCoins OR NeuCoins OR "reward points" OR "points balance" OR "available balance" OR "miles balance" OR "current balance" OR "loyalty points" OR "cashback balance" OR "points earned" OR "membership no" OR "member number" OR "frequent flyer number" OR "membership id" OR "account summary")',
+].join(' OR ');
 
-// How far back an initial scan looks. Defaults to 365 days (1 full year)
-// to discover all monthly statements, flight miles, and loyalty balances.
-const SYNC_LOOKBACK_DAYS = Math.max(
-  1,
-  Number.parseInt(process.env.SYNC_LOOKBACK_DAYS || '365', 10) || 365
-);
-
-// Share of each scan's message cap reserved for the keyword search, so a
-// statement from an uncatalogued sender is still reachable. The floor is 5.
-const KEYWORD_BUDGET_RATIO = 0.3;
-
-// Universal Loyalty & Statement Search Intent (Domain-Agnostic)
-// Discovers statements, reward summaries, coin updates, e-statements, points, and miles from ANY sender.
-export const UNIVERSAL_LOYALTY_QUERY =
-  'subject:(points OR miles OR reward OR rewards OR statement OR balance OR cashback OR coins OR supercoins OR neucoins OR loyalty OR bluchip OR flyerbonus OR "e-statement" OR "account update") OR (points OR miles OR rewards OR SuperCoins OR NeuCoins OR "reward points" OR "points balance" OR "available balance")';
-
-export function buildLoyaltySearchQuery(domains = [], lookbackDays = SYNC_LOOKBACK_DAYS) {
-  const dateFilter = `newer_than:${lookbackDays}d`;
-  // Domain-agnostic universal intent query
-  return `(${UNIVERSAL_LOYALTY_QUERY}) ${dateFilter}`;
+export function buildLoyaltySearchQuery(domains = [], lookbackDays = null) {
+  let query = `(${UNIVERSAL_LOYALTY_QUERY})`;
+  if (domains && domains.length > 0) {
+    const domainPart = domains.slice(0, 40).map((d) => `from:${d}`).join(' OR ');
+    query = `(${UNIVERSAL_LOYALTY_QUERY} OR (${domainPart}))`;
+  }
+  if (lookbackDays && Number.isFinite(lookbackDays)) {
+    query += ` newer_than:${lookbackDays}d`;
+  }
+  return query;
 }
 
 export function extractDomain(fromHeader) {
@@ -379,8 +375,8 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
     console.warn('Gmail search fallback:', searchErr.message);
     const fallbackRes = await gmail.users.messages.list({
       userId: 'me',
-      q: `(points OR miles OR "reward points" OR "points balance" OR statement) newer_than:${SYNC_LOOKBACK_DAYS}d`,
-      maxResults: Math.min(20, cap),
+      q: `points OR miles OR reward OR rewards OR statement OR balance OR "reward points" OR "points balance" OR supercoins OR neucoins OR membership`,
+      maxResults: Math.min(100, cap),
     });
     messages = fallbackRes.data?.messages || [];
   }
@@ -441,19 +437,35 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
         );
         if (persist.added) programsAdded += 1;
         if (persist.updated) programsUpdated += 1;
-        detectedAccounts.push({
+        const detectionObj = {
           from: fromHeader,
           domain: extractDomain(fromHeader),
           subject: subjectHeader,
           receivedAt: new Date(dateHeader),
           preview,
+          programName: persist.program?.name || parsed.loyaltyData.programName || extractDomain(fromHeader),
+          category: persist.program?.category || 'other',
+          balance: parsed.loyaltyData.balance ?? 0,
+          accountNumber: parsed.loyaltyData.accountNumber || null,
+          foundAt: new Date().toISOString(),
           ...parsed.loyaltyData,
-        });
+        };
+        detectedAccounts.push(detectionObj);
+
+        // Stream newly discovered points immediately to sync_jobs.live_detections for the live dopamine feed!
+        if (jobId) {
+          await EmailSyncRepo.recordLiveDetection(jobId, {
+            programName: detectionObj.programName,
+            category: detectionObj.category,
+            balance: detectionObj.balance,
+            accountNumber: detectionObj.accountNumber,
+            foundAt: detectionObj.foundAt,
+          }, processed + 1);
+        }
       }
 
       processed += 1;
-      // Batched heartbeat: cheap enough to stay responsive, not so chatty that
-      // it doubles the query count on a large inbox.
+      // Batched heartbeat for non-detection steps
       if (jobId && processed % PROGRESS_UPDATE_EVERY === 0) {
         await EmailSyncRepo.updateJobProgress(jobId, processed);
       }
@@ -509,8 +521,16 @@ export async function processSyncJob(job) {
     });
     return result;
   } catch (err) {
-    await EmailSyncRepo.markJobFailed(job.id, err.message);
-    throw err;
+    let friendlyError = err.message || 'Gmail sync failed';
+    if (
+      friendlyError.includes('Insufficient Permission') ||
+      friendlyError.includes('insufficient authentication scopes')
+    ) {
+      friendlyError =
+        'Permission Needed: You must check the box for "View your email messages and settings" during Google Sign-In so PointzPlus can find your statements. Please remove this mailbox and reconnect.';
+    }
+    await EmailSyncRepo.markJobFailed(job.id, friendlyError);
+    throw new Error(friendlyError);
   }
 }
 
@@ -561,6 +581,12 @@ export const gmailService = {
     const { tokens } = await oAuth2Client.getToken(code);
     oAuth2Client.setCredentials(tokens);
 
+    // Verify scope granted
+    const grantedScopes = (tokens.scope || '').toLowerCase();
+    const hasGmailRead =
+      grantedScopes.includes('gmail.readonly') ||
+      grantedScopes.includes('https://www.googleapis.com/auth/gmail.readonly');
+
     // Fetch user email via OAuth2 userinfo
     let email = null;
     try {
@@ -579,11 +605,17 @@ export const gmailService = {
       historyId = profile.data?.historyId || null;
     } catch (err) {
       console.warn('Gmail getProfile note:', err.message);
-      if (!email) {
+      if (!hasGmailRead || err.message?.includes('Insufficient Permission') || err.message?.includes('insufficient authentication scopes')) {
         throw new Error(
-          'Insufficient Permission: Make sure "Gmail API" is enabled in Google Cloud Console and that the Gmail read-only checkbox was allowed during sign-in.'
+          'Permission Needed: You must check the box for "View your email messages and settings" during Google Sign-In so PointzPlus can find your statements.'
         );
       }
+    }
+
+    if (!hasGmailRead) {
+      throw new Error(
+        'Permission Needed: You must check the box for "View your email messages and settings" during Google Sign-In so PointzPlus can find your statements.'
+      );
     }
 
     if (!email) {
@@ -622,10 +654,15 @@ export const gmailService = {
     }
 
     // One job per mailbox so every connected inbox is scanned, not just the
-    // first. They run sequentially in the worker via SKIP LOCKED claiming.
+    // first. If a job is already in progress, reuse it instead of creating duplicates.
     const jobs = [];
     for (const account of accounts) {
-      jobs.push(await EmailSyncRepo.createJob(userId, provider, account.id));
+      const active = await EmailSyncRepo.findActiveJob(userId, account.id);
+      if (active) {
+        jobs.push(active);
+      } else {
+        jobs.push(await EmailSyncRepo.createJob(userId, provider, account.id));
+      }
     }
     // A worker claims these. Nudging the bus only removes the poll latency.
     notifyJobQueued();

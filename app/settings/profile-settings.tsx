@@ -25,15 +25,15 @@ export default function ProfileSettingsScreen() {
   const { user, updateProfile } = useAuth();
 
   // Parse first and last names
-  const initialFullName = user?.name || "Davinder singh";
+  const initialFullName = user?.name || "";
   const nameParts = initialFullName.split(" ");
-  const initialFirst = nameParts[0] || "Davinder";
-  const initialLast = nameParts.slice(1).join(" ") || "Singh";
+  const initialFirst = nameParts[0] || (user?.email ? user.email.split("@")[0] : "");
+  const initialLast = nameParts.slice(1).join(" ") || "";
 
   const [firstName, setFirstName] = useState(initialFirst);
   const [lastName, setLastName] = useState(initialLast);
-  const [email, setEmail] = useState(user?.email || "davinder2038@gmail.com");
-  const [phone, setPhone] = useState(user?.phone || "+919041226707");
+  const [email, setEmail] = useState(user?.email || "");
+  const [phone, setPhone] = useState(user?.phone || "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);

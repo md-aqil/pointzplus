@@ -101,6 +101,10 @@ export const emailSyncController = {
 
     try {
       const email = await gmailService.exchangeCode(code, userId);
+      // Auto-queue background scan immediately upon connecting
+      gmailService.scan(userId, 'gmail', false).catch((err) => {
+        console.warn('[AutoScan] Queue error on connect:', err.message);
+      });
       res.send(connectedPage(email));
     } catch (err) {
       console.error('Google callback error:', err);

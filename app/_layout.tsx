@@ -148,27 +148,38 @@ export default function RootLayout() {
         {Platform.OS === "web" ? (
           <View
             style={{
-              flex: 1,
+              position: "fixed" as any,
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: "100vh" as any,
+              width: "100vw" as any,
               backgroundColor: "#070617",
               alignItems: "center",
               justifyContent: "center",
-              minHeight: "100vh" as any,
-              width: "100%",
+              padding: 16,
+              overflow: "hidden",
             }}
           >
             <View
               style={{
                 width: "100%",
-                maxWidth: 430,
+                maxWidth: 480,
                 height: "100%",
-                minHeight: "100vh" as any,
+                maxHeight: "min(880px, calc(100vh - 32px))" as any,
                 backgroundColor: "#F5FEFF",
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 10 },
-                shadowOpacity: 0.35,
-                shadowRadius: 25,
+                borderRadius: 40,
+                borderWidth: 5,
+                borderColor: "#1A192E",
+                shadowColor: "#000000",
+                shadowOffset: { width: 0, height: 20 },
+                shadowOpacity: 0.45,
+                shadowRadius: 32,
                 overflow: "hidden",
                 position: "relative",
+                display: "flex" as any,
+                flexDirection: "column",
               }}
             >
               {stackContent}

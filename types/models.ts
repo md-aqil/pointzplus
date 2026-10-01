@@ -25,12 +25,21 @@ export interface NotificationItem {
 /** Lifecycle of a server-side Gmail scan job (mirrors sync_job_status in PostgreSQL). */
 export type SyncJobStatus = "queued" | "fetching" | "parsing" | "completed" | "failed";
 
+export interface LiveDetection {
+  programName: string;
+  category?: string;
+  balance: number;
+  accountNumber?: string;
+  foundAt: string;
+}
+
 export interface SyncJob {
   id: string;
   status: SyncJobStatus;
   total_messages_found: number | null;
   messages_processed: number | null;
   programs_updated: number | null;
+  live_detections?: LiveDetection[];
   error_details: string | null;
   created_at?: string;
   started_at?: string | null;
