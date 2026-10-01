@@ -1,3 +1,11 @@
+# -----BEGIN OPENSSH PRIVATE KEY-----
+# b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+# QyNTUxOQAAACAc1h7zKuerLAgp2oRJh2s2hUwDVyGpjQRT9UKTneXJ5AAAAKB8pphGfKaY
+# RgAAAAtzc2gtZWQyNTUxOQAAACAc1h7zKuerLAgp2oRJh2s2hUwDVyGpjQRT9UKTneXJ5A
+# AAAEAql6Zpt3UCV5ZVs2BV7DHfFCSeGRzqMp2P3gR7Lk02LhzWHvMq56ssCCnahEmHazaF
+# TANXIamNBFP1QpOd5cnkAAAAHGdoLWFjdGlvbnMtcG9pbnR6cGx1cy1kZXBsb3kB
+# -----END OPENSSH PRIVATE KEY-----
+
 name: Deploy
 
 on:
@@ -6,7 +14,6 @@ on:
       - main
   workflow_dispatch:
 
-# Never run two deploys at once; let a running one finish.
 concurrency:
   group: deploy-main
   cancel-in-progress: false

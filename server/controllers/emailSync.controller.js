@@ -10,7 +10,14 @@ import { asyncHandler, ApiError } from '../lib/errors.js';
 
 const APP_DEEP_LINK =
   process.env.APP_DEEP_LINK || 'pointzplus://email-sync/success?provider=google';
-const WEB_RETURN_URL = process.env.WEB_RETURN_URL || 'http://localhost:8081/email-sync';
+// Where the browser returns after OAuth. Set WEB_RETURN_URL (e.g. https://app.example.com/email-sync);
+// the localhost fallback is for local development only.
+const WEB_RETURN_URL =
+  process.env.WEB_RETURN_URL ||
+  (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8081/email-sync');
+if (!WEB_RETURN_URL) {
+  console.warn('[emailSync] WEB_RETURN_URL is not set; the "Return to PointzPlus" link will be empty.');
+}
 
 function connectedPage(email) {
   return `
