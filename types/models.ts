@@ -115,7 +115,7 @@ export interface ParsedEmailStatement {
   extracted_balance: number;
   extracted_account_number: string | null;
   extracted_expiry_date: string | null;
-  parser_confidence: number;
+  parser_confidence?: number | null;
   raw_text_preview: string | null;
   extraction_source: "ai_extractor" | "rule_parser" | string;
   created_at: string;

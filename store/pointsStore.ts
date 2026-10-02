@@ -685,22 +685,25 @@ export const usePointsStore = create<PointsState>((set, get) => ({
   },
 
   refreshAll: async (force = false) => {
+    // Always refresh active background sync job status
+    const activeSyncPromise = get().checkActiveSyncStatus().catch(() => {});
+
     const needsAccounts = force || !isResourceFresh("accounts");
     const needsNotifications = force || !isResourceFresh("notifications");
     const needsPortfolio = force || !isResourceFresh("portfolio");
 
-    // If all resources are already fresh, return without redundant network requests
+    // If all cached resources are already fresh, await activeSyncPromise and return
     if (!needsAccounts && !needsNotifications && !needsPortfolio) {
+      await activeSyncPromise;
       return;
     }
 
     set({ isSyncing: true });
     try {
-      const tasks: Promise<void>[] = [];
+      const tasks: Promise<any>[] = [activeSyncPromise];
       if (needsAccounts) tasks.push(get().fetchAccountsFromBackend(force));
       if (needsNotifications) tasks.push(get().fetchNotificationsFromBackend(force));
       if (needsPortfolio) tasks.push(get().fetchPortfolioFromBackend(force));
-      tasks.push(get().checkActiveSyncStatus());
 
       await Promise.all(tasks);
     } finally {

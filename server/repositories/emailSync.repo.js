@@ -527,7 +527,9 @@ export const EmailSyncRepo = {
 
   findAnyActiveJob(userId) {
     return query(
-      `SELECT * FROM sync_jobs
+      `SELECT id, status, provider, total_messages_found, messages_processed,
+              programs_updated, rejected_emails, created_at
+       FROM sync_jobs
        WHERE user_id = $1
          AND status IN ('queued', 'fetching', 'parsing')
        ORDER BY created_at DESC
@@ -539,7 +541,8 @@ export const EmailSyncRepo = {
   listEmailStatements(userId, limit = 200) {
     return query(
       `SELECT es.id, es.from_email, es.subject, es.received_at, es.extracted_balance,
-              es.extracted_account_number, es.extracted_expiry_date, es.parser_confidence,
+              es.extracted_account_number, es.extracted_expiry_date,
+              COALESCE(es.parser_confidence, 0.95) as parser_confidence,
               es.raw_text_preview, es.extraction_source, es.created_at,
               lp.name as program_name, lp.category, lp.logo_initial, lp.accent_color
        FROM email_statements es
