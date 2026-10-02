@@ -489,17 +489,43 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
     await EmailSyncRepo.markJobParsing(jobId, messages.length);
   }
 
+/**
+ * Executes async worker tasks with bounded concurrency.
+ */
+async function mapConcurrent(items, concurrency, fn) {
+  let index = 0;
+  const results = new Array(items.length);
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (index < items.length) {
+      const i = index++;
+      try {
+        results[i] = await fn(items[i], i);
+      } catch (err) {
+        console.error(`[GmailService] Worker error at index ${i}:`, err.message);
+        results[i] = null;
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+  const concurrency = Math.max(1, Math.min(8, Number.parseInt(process.env.SYNC_CONCURRENCY || '4', 10) || 4));
   const detectedAccounts = [];
   const rejectedEmails = [];
   let programsAdded = 0;
   let programsUpdated = 0;
   let processed = 0;
 
-  for (const msg of messages) {
+  await mapConcurrent(messages, concurrency, async (msg) => {
     try {
       const detail = await fetchMessageWithBackoff(gmail, msg.id);
+      if (!detail?.data?.payload) {
+        processed += 1;
+        return;
+      }
 
-      const headers = detail.data.payload?.headers || [];
+      const headers = detail.data.payload.headers || [];
       const fromHeader = headers.find((h) => h.name.toLowerCase() === 'from')?.value || '';
       const subjectHeader = headers.find((h) => h.name.toLowerCase() === 'subject')?.value || '';
       const dateHeader = headers.find((h) => h.name.toLowerCase() === 'date')?.value || new Date();
@@ -559,6 +585,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
         };
         detectedAccounts.push(detectionObj);
 
+        processed += 1;
         // Stream newly discovered points immediately to sync_jobs.live_detections for the live dopamine feed!
         if (jobId) {
           await EmailSyncRepo.recordLiveDetection(jobId, {
@@ -567,7 +594,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
             balance: detectionObj.balance,
             accountNumber: detectionObj.accountNumber,
             foundAt: detectionObj.foundAt,
-          }, processed + 1);
+          }, processed);
         }
       } else {
         const rejectedObj = sanitizeRejectedEmail({
@@ -581,21 +608,22 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
         });
         rejectedEmails.push(rejectedObj);
 
+        processed += 1;
         // Stream sanitized rejected diagnostic to sync_jobs (capped at 100 entries)
         if (jobId && rejectedEmails.length <= 100) {
-          await EmailSyncRepo.recordRejectedEmail(jobId, rejectedObj, processed + 1);
+          await EmailSyncRepo.recordRejectedEmail(jobId, rejectedObj, processed);
+        } else if (jobId && processed % PROGRESS_UPDATE_EVERY === 0) {
+          await EmailSyncRepo.updateJobProgress(jobId, processed);
         }
       }
-
+    } catch (msgErr) {
       processed += 1;
-      // Batched heartbeat for non-detection steps
+      console.error(`Error parsing message ${msg.id}:`, msgErr.message);
       if (jobId && processed % PROGRESS_UPDATE_EVERY === 0) {
         await EmailSyncRepo.updateJobProgress(jobId, processed);
       }
-    } catch (msgErr) {
-      console.error(`Error parsing message ${msg.id}:`, msgErr.message);
     }
-  }
+  });
 
   const profile = await gmail.users.getProfile({ userId: 'me' }).catch(() => null);
   const nextHistoryId = profile?.data?.historyId || historyId || account.history_id;
