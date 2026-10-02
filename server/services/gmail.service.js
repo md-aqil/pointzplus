@@ -353,7 +353,7 @@ async function persistLoyaltyResult(userId, parsed, fromHeader, subjectHeader, r
 // ─── Scan pipeline ───────────────────────────────────────────────
 
 
-const FETCH_DELAY_MS = Math.max(0, Number.parseInt(process.env.SYNC_FETCH_DELAY_MS || '120', 10) || 120);
+const FETCH_DELAY_MS = Math.max(0, Number.parseInt(process.env.SYNC_FETCH_DELAY_MS || '40', 10) || 40);
 const QUOTA_MAX_RETRIES = 4;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -381,9 +381,9 @@ async function fetchMessageWithBackoff(gmail, id) {
   throw lastErr;
 }
 
-// Maximum matching messages to scan. Defaults to 100 matching statements for fast responsive syncing.
-// Can be set higher via SYNC_MAX_RESULTS if needed.
-const DEFAULT_MAX_RESULTS = 100;
+// Maximum matching messages to scan across entire mailbox history (up to 10,000 statements).
+// Can be customized via SYNC_MAX_RESULTS if needed.
+const DEFAULT_MAX_RESULTS = 10000;
 
 function resolveMaxResults() {
   const override = Number.parseInt(process.env.SYNC_MAX_RESULTS || '', 10);
@@ -475,12 +475,32 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
     }
   } catch (searchErr) {
     console.warn('Gmail search fallback:', searchErr.message);
-    const fallbackRes = await gmail.users.messages.list({
-      userId: 'me',
-      q: `points OR miles OR reward OR rewards OR statement OR balance OR "reward points" OR "points balance" OR supercoins OR neucoins OR membership`,
-      maxResults: Math.min(100, cap),
-    });
-    messages = fallbackRes.data?.messages || [];
+    const seenFallback = new Set();
+    let fallbackToken = undefined;
+    try {
+      do {
+        const pageSize = Math.min(500, cap - messages.length);
+        if (pageSize <= 0) break;
+        const fallbackRes = await gmail.users.messages.list({
+          userId: 'me',
+          q: `points OR miles OR reward OR rewards OR statement OR balance OR "reward points" OR "points balance" OR supercoins OR neucoins OR membership`,
+          maxResults: pageSize,
+          pageToken: fallbackToken,
+        });
+        const rawFallback = fallbackRes.data?.messages || [];
+        for (const m of rawFallback) {
+          if (!seenFallback.has(m.id)) {
+            seenFallback.add(m.id);
+            messages.push(m);
+          }
+        }
+        fallbackToken = fallbackRes.data?.nextPageToken;
+        if (!fallbackToken || messages.length >= cap) break;
+      } while (fallbackToken);
+      messages.reverse();
+    } catch (fbErr) {
+      console.error('Fallback search error:', fbErr.message);
+    }
   }
 
   // Fetching is done. Publish the parse phase and the real match count so the
@@ -510,7 +530,7 @@ async function mapConcurrent(items, concurrency, fn) {
   return results;
 }
 
-  const concurrency = Math.max(1, Math.min(8, Number.parseInt(process.env.SYNC_CONCURRENCY || '4', 10) || 4));
+  const concurrency = Math.max(1, Math.min(12, Number.parseInt(process.env.SYNC_CONCURRENCY || '6', 10) || 6));
   const detectedAccounts = [];
   const rejectedEmails = [];
   let programsAdded = 0;
