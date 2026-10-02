@@ -110,17 +110,22 @@ export default function SyncRejectedScreen() {
 
   const lastSyncRejectedEmails = usePointsStore((s) => s.lastSyncRejectedEmails);
 
-  // Poll active scan status when screen is open
+  // Initial data load on mount
   useEffect(() => {
     fetchParsedStatements(300);
     checkActiveSyncStatus();
+  }, [fetchParsedStatements, checkActiveSyncStatus]);
+
+  // Adaptive polling: only poll while a sync / backfill job is actively running
+  useEffect(() => {
+    if (!isBackfillRunning && !isSyncing) return;
 
     const interval = setInterval(() => {
       checkActiveSyncStatus();
     }, 4000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [isBackfillRunning, isSyncing, checkActiveSyncStatus]);
 
   const onRefresh = async () => {
     setRefreshing(true);

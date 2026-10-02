@@ -57,14 +57,17 @@ export default function EmailSyncScreen() {
   const autoScannedAccountsRef = useRef<Set<string>>(new Set());
   const lastDetectionsCountRef = useRef(0);
 
-  // Poll background scan job status
+  // Check background scan job status on mount & adaptively poll while active
   useEffect(() => {
     checkActiveSyncStatus();
+
+    if (!isBackfillRunning && !isSyncing) return;
+
     const interval = setInterval(() => {
       checkActiveSyncStatus();
     }, 4000);
     return () => clearInterval(interval);
-  }, [checkActiveSyncStatus]);
+  }, [isBackfillRunning, isSyncing, checkActiveSyncStatus]);
 
   // Trigger micro-haptics when new loyalty programs are discovered in real time
   useEffect(() => {

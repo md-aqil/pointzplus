@@ -658,20 +658,26 @@ export const usePointsStore = create<PointsState>((set, get) => ({
 
   checkActiveSyncStatus: async () => {
     try {
+      const wasRunning = get().isBackfillRunning;
       const res = await apiClient.getActiveSyncJob();
       if (res && res.activeJob) {
         set({
           isBackfillRunning: res.isSyncing,
           activeJobDetails: res.activeJob,
+          lastSyncRejectedEmails: Array.isArray(res.activeJob.rejected_emails)
+            ? res.activeJob.rejected_emails
+            : [],
         });
-        if (Array.isArray(res.activeJob.rejected_emails) && res.activeJob.rejected_emails.length > 0) {
-          set({ lastSyncRejectedEmails: res.activeJob.rejected_emails });
-        }
       } else {
         set({
           isBackfillRunning: false,
           activeJobDetails: null,
         });
+        // If a background job just finished, reload portfolio & statements
+        if (wasRunning) {
+          get().fetchAccountsFromBackend(true).catch(() => {});
+          get().fetchParsedStatements(300).catch(() => {});
+        }
       }
     } catch {
       // Ignored
