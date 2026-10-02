@@ -21,6 +21,8 @@ import {
   Layers,
   Utensils,
   Fuel,
+  Sparkles,
+  ArrowRight,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { DashboardTopBg } from "../../components/ui/DashboardTopBg";
@@ -30,7 +32,7 @@ import { useAuth } from "../../hooks/useAuth";
 export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { summary, categories, expiringAccounts, refreshAll, isSyncing } = usePoints();
+  const { summary, categories, expiringAccounts, accounts, refreshAll, isSyncing } = usePoints();
   const [refreshing, setRefreshing] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -41,8 +43,8 @@ export default function HomeScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await refreshAll();
-    setTimeout(() => setRefreshing(false), 500);
+    await refreshAll(true);
+    setRefreshing(false);
   };
 
   const displayName =
@@ -56,6 +58,11 @@ export default function HomeScreen() {
     const t = new Date(acc.expiryDate).getTime();
     return !isNaN(t) && t <= Date.now() + 30 * 24 * 60 * 60 * 1000;
   });
+
+  // Recently discovered/updated loyalty accounts (newest first)
+  const latestDiscovered = [...accounts]
+    .sort((a, b) => new Date(b.lastSyncedAt || 0).getTime() - new Date(a.lastSyncedAt || 0).getTime())
+    .slice(0, 3);
 
   // Real brand counts per category for the quick-nav cards
   const categoryBrandCounts: Record<string, number> = {};
@@ -367,94 +374,202 @@ export default function HomeScreen() {
 
         {/* ─── White Rounded Body Container ──────────────────────────── */}
         <View className="bg-[#F8FAFC] rounded-t-[32px] -mt-6 pt-6 px-5 flex-1">
-          {/* ─── Section 1: Pts Expire in 30 days ─────────────────────── */}
-          <View className="flex-row items-center justify-between mb-4">
-            <Text
-              style={{ fontFamily: "PlusJakartaSans-Bold" }}
-              className="text-[18px] text-slate-900"
-            >
-              Pts Expire in 30 days
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push("/(tabs)/overview");
-              }}
-            >
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
-                className="text-sm text-[#00A3FF]"
-              >
-                View All
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Expiry Cards List */}
-          <View className="mb-6">
-            {soonExpiring.length > 0 ? (
-              soonExpiring.slice(0, 3).map((acc) => (
-                <TouchableOpacity
-                  key={acc.id}
-                  onPress={() => router.push(`/category/${acc.program.category}`)}
-                  activeOpacity={0.85}
-                  className="bg-white rounded-2xl p-4 mb-3 border border-slate-200/60 shadow-sm flex-row items-center justify-between"
+          {/* ─── Section 1: Pts Expire in 30 days OR Live Discovery Stream ─── */}
+          {soonExpiring.length > 0 ? (
+            <>
+              <View className="flex-row items-center justify-between mb-4">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-[18px] text-slate-900"
                 >
-                  <View className="flex-row items-center flex-1 mr-2">
-                    <View
-                      style={{ backgroundColor: `${acc.program.accentColor}22` }}
-                      className="w-11 h-11 rounded-xl items-center justify-center mr-3 border border-slate-100"
-                    >
-                      <Text className="text-lg">{acc.program.logoInitial}</Text>
-                    </View>
-                    <View className="flex-1">
-                      <Text
-                        style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                        className="text-[15px] text-slate-900"
-                      >
-                        {acc.program.name}
-                      </Text>
-                      <Text
-                        style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                        className="text-[12.5px] text-slate-500 mt-0.5"
-                      >
-                        {acc.expiringPoints.toLocaleString()} pts expire{" "}
-                        {acc.expiryDate && !isNaN(new Date(acc.expiryDate).getTime())
-                          ? new Date(acc.expiryDate).toLocaleDateString("en-GB", {
-                              day: "numeric",
-                              month: "short",
-                              year: "numeric",
-                            })
-                          : "soon"}
-                      </Text>
-                    </View>
-                  </View>
-
+                  Pts Expire in 30 days
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push("/(tabs)/overview");
+                  }}
+                >
                   <Text
-                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                    className="text-[17px] text-slate-900"
+                    style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
+                    className="text-sm text-[#00A3FF]"
                   >
-                    {acc.currentBalance.toLocaleString()}
+                    View All
                   </Text>
                 </TouchableOpacity>
-              ))
-            ) : (
-              <View className="bg-white rounded-2xl p-5 border border-slate-200/60 shadow-sm items-center">
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
-                  className="text-sm text-slate-900 mb-1"
-                >
-                  No points expiring soon
-                </Text>
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                  className="text-xs text-slate-500 text-center"
-                >
-                  Link a program or run a Gmail sync to see expiry alerts here.
-                </Text>
               </View>
-            )}
-          </View>
+
+              {/* Expiry Cards List */}
+              <View className="mb-6">
+                {soonExpiring.slice(0, 3).map((acc) => (
+                  <TouchableOpacity
+                    key={acc.id}
+                    onPress={() => router.push(`/category/${acc.program.category}`)}
+                    activeOpacity={0.85}
+                    className="bg-white rounded-2xl p-4 mb-3 border border-slate-200/60 shadow-sm flex-row items-center justify-between"
+                  >
+                    <View className="flex-row items-center flex-1 mr-2">
+                      <View
+                        style={{ backgroundColor: `${acc.program.accentColor}22` }}
+                        className="w-11 h-11 rounded-xl items-center justify-center mr-3 border border-slate-100"
+                      >
+                        <Text className="text-lg">{acc.program.logoInitial}</Text>
+                      </View>
+                      <View className="flex-1">
+                        <Text
+                          style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                          className="text-[15px] text-slate-900"
+                        >
+                          {acc.program.name}
+                        </Text>
+                        <Text
+                          style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                          className="text-[12.5px] text-slate-500 mt-0.5"
+                        >
+                          {acc.expiringPoints.toLocaleString()} pts expire{" "}
+                          {acc.expiryDate && !isNaN(new Date(acc.expiryDate).getTime())
+                            ? new Date(acc.expiryDate).toLocaleDateString("en-GB", {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              })
+                            : "soon"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                      className="text-[17px] text-slate-900"
+                    >
+                      {acc.currentBalance.toLocaleString()}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : (
+            <>
+              {/* Live Discovery Stream (Latest Points Found) */}
+              <View className="flex-row items-center justify-between mb-4">
+                <View className="flex-row items-center">
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-[18px] text-slate-900 mr-2"
+                  >
+                    Live Discovery Stream
+                  </Text>
+                  <View className="bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-full flex-row items-center">
+                    <View className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5" />
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                      className="text-[10.5px] text-emerald-700"
+                    >
+                      LIVE
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push("/email-sync");
+                  }}
+                  className="flex-row items-center"
+                >
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
+                    className="text-sm text-[#00A3FF] mr-1"
+                  >
+                    Auto-Sync
+                  </Text>
+                  <Sparkles size={14} color="#00A3FF" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Latest Discovered Cards */}
+              <View className="mb-6">
+                {latestDiscovered.length > 0 ? (
+                  latestDiscovered.map((acc) => (
+                    <TouchableOpacity
+                      key={acc.id}
+                      onPress={() => router.push(`/category/${acc.program.category}`)}
+                      activeOpacity={0.85}
+                      className="bg-white rounded-2xl p-4 mb-3 border border-slate-200/60 shadow-sm flex-row items-center justify-between"
+                    >
+                      <View className="flex-row items-center flex-1 mr-2">
+                        <View
+                          style={{ backgroundColor: `${acc.program.accentColor}18` }}
+                          className="w-11 h-11 rounded-xl items-center justify-center mr-3 border border-slate-100"
+                        >
+                          <Text className="text-lg">{acc.program.logoInitial}</Text>
+                        </View>
+                        <View className="flex-1">
+                          <Text
+                            style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                            className="text-[15px] text-slate-900"
+                          >
+                            {acc.program.name}
+                          </Text>
+                          <Text
+                            style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                            className="text-[12px] text-slate-500 mt-0.5"
+                          >
+                            {acc.accountNumberMasked && acc.accountNumberMasked !== "MEMBER-***"
+                              ? `${acc.accountNumberMasked} • `
+                              : ""}
+                            Discovered from Gmail
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View className="bg-[#EAFBF3] border border-emerald-100 px-3 py-1.5 rounded-xl items-center justify-center">
+                        <Text
+                          style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                          className="text-[15px] text-emerald-600"
+                        >
+                          +{acc.currentBalance.toLocaleString()}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      router.push("/email-sync");
+                    }}
+                    activeOpacity={0.9}
+                    className="bg-sky-50/80 rounded-2xl p-5 border border-sky-200/60 shadow-sm flex-row items-center justify-between"
+                  >
+                    <View className="flex-row items-center flex-1 mr-3">
+                      <View className="w-12 h-12 rounded-2xl bg-white shadow-sm border border-sky-100 items-center justify-center mr-3.5">
+                        <Sparkles size={22} color="#01A2FB" />
+                      </View>
+                      <View className="flex-1">
+                        <Text
+                          style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                          className="text-[15px] text-slate-900"
+                        >
+                          Auto-Discover Your Points
+                        </Text>
+                        <Text
+                          style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                          className="text-[12.5px] text-slate-600 mt-0.5 leading-4"
+                        >
+                          Sync Gmail to extract all your loyalty points & miles live.
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View className="w-9 h-9 rounded-full bg-[#01A2FB] items-center justify-center">
+                      <ArrowRight size={18} color="#FFFFFF" strokeWidth={2.4} />
+                    </View>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </>
+          )}
 
           {/* ─── Section 2: Points by category ────────────────────────── */}
           <View className="flex-row items-center justify-between mb-4 mt-2">

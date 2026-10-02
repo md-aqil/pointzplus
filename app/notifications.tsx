@@ -57,7 +57,7 @@ export default function NotificationsScreen() {
     <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">
       <ScreenHeader
         title="Notifications"
-        onBack={() => router.back()}
+        fallbackRoute="/(tabs)/home"
         rightAction={
           unreadCount > 0 ? (
             <TouchableOpacity

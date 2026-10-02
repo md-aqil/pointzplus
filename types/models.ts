@@ -33,6 +33,18 @@ export interface LiveDetection {
   foundAt: string;
 }
 
+export interface RejectedEmail {
+  messageId?: string;
+  from: string;
+  domain?: string;
+  subject: string;
+  receivedAt: string;
+  preview: string;
+  reason: "NO_REWARD_SIGNALS" | "AI_NON_LOYALTY" | "NO_VALID_BALANCE" | "AI_ERROR" | "PDF_UNREADABLE" | string;
+  aiNotes?: string;
+  hasAttachments?: boolean;
+}
+
 export interface SyncJob {
   id: string;
   status: SyncJobStatus;
@@ -40,6 +52,7 @@ export interface SyncJob {
   messages_processed: number | null;
   programs_updated: number | null;
   live_detections?: LiveDetection[];
+  rejected_emails?: RejectedEmail[];
   error_details: string | null;
   created_at?: string;
   started_at?: string | null;

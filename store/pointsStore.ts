@@ -8,7 +8,7 @@ import {
   CategorySummary,
   LoyaltyCategory,
 } from "../types/loyalty";
-import { NotificationItem, SyncJob, SyncJobStatus, LiveDetection, BackendLinkedAccount } from "../types/models";
+import { NotificationItem, SyncJob, SyncJobStatus, LiveDetection, RejectedEmail, BackendLinkedAccount } from "../types/models";
 import { POPULAR_PROGRAMS, CATEGORY_LABELS } from "../constants/popularPrograms";
 import { apiClient } from "../lib/apiClient";
 import { notifyPointsEarned } from "../services/pushNotifications";
@@ -22,18 +22,20 @@ export type SyncProgress = {
   percent: number;
   liveDetections?: LiveDetection[];
   totalPointsDiscovered?: number;
+  rejectedEmails?: RejectedEmail[];
 };
 
 // During `parsing` the server reports how many messages it has handled, so the
 // bar tracks real work across the 80–92% band instead of animating blindly.
 const SYNC_JOB_PROGRESS: Partial<Record<SyncJobStatus, (job: SyncJob) => SyncProgress>> = {
-  queued: () => ({ step: "Scan queued – waiting for the sync worker...", percent: 30, liveDetections: [], totalPointsDiscovered: 0 }),
-  fetching: () => ({ step: "Searching your inbox for statements & promo tokens...", percent: 55, liveDetections: [], totalPointsDiscovered: 0 }),
+  queued: () => ({ step: "Scan queued – waiting for the sync worker...", percent: 30, liveDetections: [], totalPointsDiscovered: 0, rejectedEmails: [] }),
+  fetching: () => ({ step: "Searching your inbox for statements & promo tokens...", percent: 55, liveDetections: [], totalPointsDiscovered: 0, rejectedEmails: [] }),
   parsing: (job) => {
     const total = Number(job.total_messages_found) || 0;
     const done = Number(job.messages_processed) || 0;
     const ratio = total > 0 ? Math.min(1, done / total) : 0;
     const liveDetections = job.live_detections || [];
+    const rejectedEmails = job.rejected_emails || [];
     const totalPoints = liveDetections.reduce((acc, d) => acc + (Number(d.balance) || 0), 0);
     return {
       step:
@@ -43,21 +45,40 @@ const SYNC_JOB_PROGRESS: Partial<Record<SyncJobStatus, (job: SyncJob) => SyncPro
       percent: 80 + Math.round(ratio * 12),
       liveDetections,
       totalPointsDiscovered: totalPoints,
+      rejectedEmails,
     };
   },
   completed: (job) => {
     const liveDetections = job?.live_detections || [];
+    const rejectedEmails = job?.rejected_emails || [];
     const totalPoints = liveDetections.reduce((acc, d) => acc + (Number(d.balance) || 0), 0);
     return {
       step: "Finalizing your portfolio...",
       percent: 95,
       liveDetections,
       totalPointsDiscovered: totalPoints,
+      rejectedEmails,
     };
   },
 };
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// ─── Per-Resource Fetch Timestamps & TTL Caching ───────────────
+// Timestamps are ONLY updated when an API fetch succeeds, so failures can be retried immediately.
+const lastFetchTimestamps = {
+  accounts: 0,
+  notifications: 0,
+  portfolio: 0,
+};
+const RESOURCE_TTL_MS = 30_000;
+
+export function isResourceFresh(
+  resource: "accounts" | "notifications" | "portfolio",
+  ttl = RESOURCE_TTL_MS
+): boolean {
+  return Date.now() - (lastFetchTimestamps[resource] || 0) < ttl;
+}
 
 /** Map a `linked_accounts` API row onto the client model, joined to the catalogue. */
 function mapBackendAccount(a: BackendLinkedAccount): LinkedAccount {
@@ -89,6 +110,8 @@ function mapBackendAccount(a: BackendLinkedAccount): LinkedAccount {
   };
 }
 
+const SYNC_JOB_MAX_POLL_DURATION_MS = 15 * 60 * 1_000;
+
 /**
  * Poll a queued Gmail scan until it reaches a terminal state.
  * The scan runs in a background job, so this is how the UI learns it finished.
@@ -97,10 +120,14 @@ async function pollSyncJob(
   jobId: string,
   onStatus: (job: SyncJob) => void
 ): Promise<SyncJob> {
-  const deadline = Date.now() + SYNC_JOB_TIMEOUT_MS;
+  const startTime = Date.now();
+  const hardMaxDeadline = startTime + SYNC_JOB_MAX_POLL_DURATION_MS;
+  let deadline = Math.min(startTime + SYNC_JOB_TIMEOUT_MS, hardMaxDeadline);
+  let lastProcessed = -1;
+  let lastLiveCount = 0;
 
   while (Date.now() < deadline) {
-    let job;
+    let job: SyncJob;
     try {
       job = await apiClient.getSyncJob(jobId);
     } catch (fetchErr: any) {
@@ -121,11 +148,29 @@ async function pollSyncJob(
       return job;
     }
 
+    // If making active progress, extend deadline bounded strictly by hardMaxDeadline
+    const currentProcessed = Number(job.messages_processed) || 0;
+    const currentLiveCount = Array.isArray(job.live_detections) ? job.live_detections.length : 0;
+    if (currentProcessed > lastProcessed || currentLiveCount > lastLiveCount) {
+      lastProcessed = currentProcessed;
+      lastLiveCount = currentLiveCount;
+      deadline = Math.min(Date.now() + 2 * 60 * 1000, hardMaxDeadline);
+    }
+
     onStatus(job);
     await delay(SYNC_JOB_POLL_INTERVAL_MS);
   }
 
-  console.error(`[pollSyncJob] Job ${jobId} timed out after ${SYNC_JOB_TIMEOUT_MS}ms`);
+  // Poll window expired: only return if the job reached a completed terminal state
+  console.warn(`[pollSyncJob] Job ${jobId} reached polling threshold; checking final state`);
+  const finalJob = await apiClient.getSyncJob(jobId).catch(() => null);
+  if (finalJob?.status === "completed") {
+    return finalJob;
+  }
+  if (finalJob?.status === "failed") {
+    throw new Error(finalJob.error_details || "Gmail sync failed. Please try again.");
+  }
+
   throw new Error("Gmail sync is taking longer than expected. Please try again shortly.");
 }
 
@@ -137,6 +182,8 @@ interface PointsState {
   notifications: NotificationItem[];
   isSyncing: boolean;
   syncProgress: SyncProgress;
+  lastSyncRejectedEmails: RejectedEmail[];
+  setLastSyncRejectedEmails: (emails: RejectedEmail[]) => void;
   /**
    * Current-month credit/debit totals as aggregated by the server.
    * Null until the first successful load, so the UI can tell "0 this month"
@@ -171,11 +218,16 @@ interface PointsState {
 
   /** Removes the mailbox whose email_sync_accounts id is given. */
   disconnectEmail: (accountId: string) => Promise<void>;
-  fetchAccountsFromBackend: () => Promise<void>;
-  fetchPortfolioFromBackend: () => Promise<void>;
-  fetchNotificationsFromBackend: () => Promise<void>;
+  fetchAccountsFromBackend: (force?: boolean) => Promise<void>;
+  fetchPortfolioFromBackend: (force?: boolean) => Promise<void>;
+  fetchNotificationsFromBackend: (force?: boolean) => Promise<void>;
   acknowledgeNotification: (id: string) => Promise<void>;
-  refreshAll: () => Promise<void>;
+  /**
+   * Reload accounts + portfolio + notifications. Skips the network when the
+   * last successful refresh is fresh, so mounting Home → Overview → Home
+   * doesn't triple-fetch. Pull-to-refresh / retry buttons pass force=true.
+   */
+  refreshAll: (force?: boolean) => Promise<void>;
   reset: () => void;
 }
 
@@ -216,110 +268,126 @@ function mapNotification(raw: any): NotificationItem {
   };
 }
 
+// ─── Pure Derivations (Stateless & Pure for Memoization) ─────────
+export function computeDashboardSummary(
+  accounts: LinkedAccount[],
+  transactions: PointsTransaction[] = [],
+  monthlyFlows: { earned: number; redeemed: number } | null = null
+): DashboardSummary {
+  const active = accounts.filter((a) => a.isActive);
+
+  const totalPoints = active.reduce((sum, a) => sum + (a.currentBalance || 0), 0);
+  const expiringThisMonth = active.reduce((sum, a) => sum + (a.expiringPoints || 0), 0);
+  const portfolioValueINR = active.reduce(
+    (sum, a) => sum + (a.currentBalance || 0) * (a.program?.pointValueINR || 0.25),
+    0
+  );
+
+  const now = new Date();
+  const inCurrentMonth = (iso: string) => {
+    const d = new Date(iso);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  };
+
+  const localEarned = transactions
+    .filter((t) => t.type === "credit" && inCurrentMonth(t.date))
+    .reduce((sum, t) => sum + (t.points || 0), 0);
+  const localRedeemed = transactions
+    .filter((t) => (t.type === "debit" || t.type === "redeemed") && inCurrentMonth(t.date))
+    .reduce((sum, t) => sum + (t.points || 0), 0);
+
+  const monthlyEarned = monthlyFlows ? monthlyFlows.earned : localEarned;
+  const monthlyRedeemed = monthlyFlows ? monthlyFlows.redeemed : localRedeemed;
+
+  return {
+    totalPoints,
+    monthlyEarned,
+    monthlyRedeemed,
+    expiringThisMonth,
+    portfolioValueINR: Math.round(portfolioValueINR),
+    linkedAccountsCount: active.length,
+  };
+}
+
+export function computeCategorySummaries(accounts: LinkedAccount[]): CategorySummary[] {
+  const active = accounts.filter((a) => a.isActive);
+
+  const categoryMap: Record<string, { totalPoints: number; brandCount: number; expiring: number }> = {};
+
+  active.forEach((acc) => {
+    const cat = acc.program?.category || "shopping";
+    if (!categoryMap[cat]) {
+      categoryMap[cat] = { totalPoints: 0, brandCount: 0, expiring: 0 };
+    }
+    categoryMap[cat].totalPoints += acc.currentBalance || 0;
+    categoryMap[cat].brandCount += 1;
+    categoryMap[cat].expiring += acc.expiringPoints || 0;
+  });
+
+  return Object.entries(categoryMap).map(([catKey, data]) => {
+    const meta = CATEGORY_LABELS[catKey] || {
+      name: catKey.charAt(0).toUpperCase() + catKey.slice(1),
+      icon: "Shield",
+      color: "#01A2FB",
+      bgColor: "#E6F6FF",
+    };
+
+    return {
+      categoryId: catKey as LoyaltyCategory,
+      categoryName: meta.name,
+      iconName: meta.icon,
+      totalPoints: data.totalPoints,
+      brandCount: data.brandCount,
+      expiringPoints: data.expiring,
+      accentColor: meta.color,
+      bgColor: meta.bgColor,
+    };
+  });
+}
+
+export function computeExpiringAccounts(accounts: LinkedAccount[]): LinkedAccount[] {
+  return accounts.filter((a) => a.isActive && (a.expiringPoints || 0) > 0);
+}
+
 export const usePointsStore = create<PointsState>((set, get) => ({
   accounts: [],
   emailAccounts: [],
   transactions: [],
   notifications: [],
   isSyncing: false,
-  syncProgress: { step: "Ready", percent: 0 },
+  syncProgress: { step: "Ready", percent: 0, rejectedEmails: [] },
+  lastSyncRejectedEmails: [],
+  setLastSyncRejectedEmails: (emails) => set({ lastSyncRejectedEmails: emails }),
   monthlyFlows: null,
 
   // ─── Selectors ──────────────────────────────────────────────────
   getDashboardSummary: () => {
     const { accounts, transactions, monthlyFlows } = get();
-    const active = accounts.filter((a) => a.isActive);
-
-    const totalPoints = active.reduce((sum, a) => sum + (a.currentBalance || 0), 0);
-    const expiringThisMonth = active.reduce((sum, a) => sum + (a.expiringPoints || 0), 0);
-    const portfolioValueINR = active.reduce(
-      (sum, a) => sum + (a.currentBalance || 0) * (a.program?.pointValueINR || 0.25),
-      0
-    );
-
-    const now = new Date();
-    const inCurrentMonth = (iso: string) => {
-      const d = new Date(iso);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    };
-
-    // `transactions` is not loaded wholesale (the endpoint is per-account and
-    // paginated), so it would always be empty and report 0. The server already
-    // aggregates these in SQL, so prefer its figures and only fall back to the
-    // local list if the analytics call has not landed yet.
-    const localEarned = transactions
-      .filter((t) => t.type === "credit" && inCurrentMonth(t.date))
-      .reduce((sum, t) => sum + (t.points || 0), 0);
-    const localRedeemed = transactions
-      .filter((t) => (t.type === "debit" || t.type === "redeemed") && inCurrentMonth(t.date))
-      .reduce((sum, t) => sum + (t.points || 0), 0);
-
-    const monthlyEarned = monthlyFlows ? monthlyFlows.earned : localEarned;
-    const monthlyRedeemed = monthlyFlows ? monthlyFlows.redeemed : localRedeemed;
-
-    return {
-      totalPoints,
-      monthlyEarned,
-      monthlyRedeemed,
-      expiringThisMonth,
-      portfolioValueINR: Math.round(portfolioValueINR),
-      linkedAccountsCount: active.length,
-    };
+    return computeDashboardSummary(accounts, transactions, monthlyFlows);
   },
 
   getCategorySummaries: () => {
     const { accounts } = get();
-    const active = accounts.filter((a) => a.isActive);
-
-    // Group accounts by category
-    const categoryMap: Record<string, { totalPoints: number; brandCount: number; expiring: number }> = {};
-
-    active.forEach((acc) => {
-      const cat = acc.program?.category || "shopping";
-      if (!categoryMap[cat]) {
-        categoryMap[cat] = { totalPoints: 0, brandCount: 0, expiring: 0 };
-      }
-      categoryMap[cat].totalPoints += acc.currentBalance || 0;
-      categoryMap[cat].brandCount += 1;
-      categoryMap[cat].expiring += acc.expiringPoints || 0;
-    });
-
-    return Object.entries(categoryMap).map(([catKey, data]) => {
-      const meta = CATEGORY_LABELS[catKey] || {
-        name: catKey.charAt(0).toUpperCase() + catKey.slice(1),
-        icon: "Shield",
-        color: "#01A2FB",
-        bgColor: "#E6F6FF",
-      };
-
-      return {
-        categoryId: catKey as LoyaltyCategory,
-        categoryName: meta.name,
-        iconName: meta.icon,
-        totalPoints: data.totalPoints,
-        brandCount: data.brandCount,
-        expiringPoints: data.expiring,
-        accentColor: meta.color,
-        bgColor: meta.bgColor,
-      };
-    });
+    return computeCategorySummaries(accounts);
   },
 
   getExpiringAccounts: () => {
     const { accounts } = get();
-    return accounts.filter((a) => a.isActive && (a.expiringPoints || 0) > 0);
+    return computeExpiringAccounts(accounts);
   },
 
   // ─── Actions ────────────────────────────────────────────────────
-  fetchAccountsFromBackend: async () => {
+  fetchAccountsFromBackend: async (force = false) => {
+    if (!force && isResourceFresh("accounts")) return;
     try {
       const [backendAccounts, backendEmailAccounts] = await Promise.all([
-        apiClient.getAccounts().catch(() => null),
+        apiClient.getAccounts(),
         apiClient.getEmailAccounts().catch(() => null),
       ]);
 
       if (Array.isArray(backendAccounts)) {
         set({ accounts: backendAccounts.map(mapBackendAccount) });
+        lastFetchTimestamps.accounts = Date.now();
       }
       if (Array.isArray(backendEmailAccounts)) {
         set({
@@ -335,37 +403,41 @@ export const usePointsStore = create<PointsState>((set, get) => ({
         });
       }
     } catch {
-      // Offline or unauthenticated fallback
+      // Failed: leave timestamp unchanged so subsequent retries are not throttled
     }
   },
 
-  fetchPortfolioFromBackend: async () => {
+  fetchPortfolioFromBackend: async (force = false) => {
+    if (!force && isResourceFresh("portfolio")) return;
     try {
       const response = await apiClient.getPortfolioSummary();
       const s = response?.summary;
-      if (!s) return;
-      set({
-        monthlyFlows: {
-          earned: Number(s.monthly_earned) || 0,
-          redeemed: Number(s.monthly_redeemed) || 0,
-        },
-      });
+      if (s) {
+        set({
+          monthlyFlows: {
+            earned: Number(s.monthly_earned) || 0,
+            redeemed: Number(s.monthly_redeemed) || 0,
+          },
+        });
+        lastFetchTimestamps.portfolio = Date.now();
+      }
     } catch {
-      // Keep monthlyFlows null so the UI falls back to the local transaction
-      // list instead of showing a confident zero that is really "unknown".
+      // Failed: leave timestamp unchanged so subsequent retries can proceed immediately
     }
   },
 
-  fetchNotificationsFromBackend: async () => {
+  fetchNotificationsFromBackend: async (force = false) => {
+    if (!force && isResourceFresh("notifications")) return;
     try {
       const response = await apiClient.getNotificationHistory({ limit: 50 });
-      set({
-        notifications: Array.isArray(response?.items)
-          ? response.items.map(mapNotification)
-          : [],
-      });
+      if (response && Array.isArray(response.items)) {
+        set({
+          notifications: response.items.map(mapNotification),
+        });
+        lastFetchTimestamps.notifications = Date.now();
+      }
     } catch {
-      // Keep the current cache on network errors
+      // Failed: leave timestamp unchanged so subsequent retries can proceed immediately
     }
   },
 
@@ -515,7 +587,8 @@ export const usePointsStore = create<PointsState>((set, get) => ({
             },
           ],
           isSyncing: false,
-          syncProgress: { step: "Done", percent: 100 },
+          syncProgress: { step: "Done", percent: 100, liveDetections: job.live_detections || [], rejectedEmails: job.rejected_emails || [] },
+          lastSyncRejectedEmails: Array.isArray(job.rejected_emails) ? job.rejected_emails : [],
         };
       });
 
@@ -553,27 +626,41 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     }));
   },
 
-  refreshAll: async () => {
+  refreshAll: async (force = false) => {
+    const needsAccounts = force || !isResourceFresh("accounts");
+    const needsNotifications = force || !isResourceFresh("notifications");
+    const needsPortfolio = force || !isResourceFresh("portfolio");
+
+    // If all resources are already fresh, return without redundant network requests
+    if (!needsAccounts && !needsNotifications && !needsPortfolio) {
+      return;
+    }
+
     set({ isSyncing: true });
     try {
-      await Promise.all([
-        get().fetchAccountsFromBackend(),
-        get().fetchNotificationsFromBackend(),
-        get().fetchPortfolioFromBackend(),
-      ]);
+      const tasks: Promise<void>[] = [];
+      if (needsAccounts) tasks.push(get().fetchAccountsFromBackend(force));
+      if (needsNotifications) tasks.push(get().fetchNotificationsFromBackend(force));
+      if (needsPortfolio) tasks.push(get().fetchPortfolioFromBackend(force));
+
+      await Promise.all(tasks);
     } finally {
       set({ isSyncing: false });
     }
   },
 
   reset: () => {
+    lastFetchTimestamps.accounts = 0;
+    lastFetchTimestamps.notifications = 0;
+    lastFetchTimestamps.portfolio = 0;
     set({
       accounts: [],
       emailAccounts: [],
       transactions: [],
       notifications: [],
       isSyncing: false,
-      syncProgress: { step: "Ready", percent: 0 },
+      syncProgress: { step: "Ready", percent: 0, rejectedEmails: [] },
+      lastSyncRejectedEmails: [],
       monthlyFlows: null,
     });
   },

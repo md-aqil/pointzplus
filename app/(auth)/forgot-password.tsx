@@ -54,7 +54,7 @@ export default function ForgotPasswordScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-light-bg">
-      <ScreenHeader onBack={() => router.back()} />
+      <ScreenHeader fallbackRoute="/(auth)/sign-in" />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}

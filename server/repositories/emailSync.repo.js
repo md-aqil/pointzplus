@@ -254,6 +254,36 @@ export const EmailSyncRepo = {
     );
   },
 
+  /** Record rejected/skipped email for diagnostics and AI improvement (capped to latest 100). */
+  recordRejectedEmail(jobId, rejectedEmail, processed) {
+    return query(
+      `UPDATE sync_jobs
+       SET rejected_emails = CASE
+             WHEN jsonb_array_length(COALESCE(rejected_emails, '[]'::jsonb)) < 100
+             THEN COALESCE(rejected_emails, '[]'::jsonb) || $2::jsonb
+             ELSE COALESCE(rejected_emails, '[]'::jsonb)
+           END,
+           messages_processed = $3,
+           locked_at = NOW()
+       WHERE id = $1`,
+      [jobId, JSON.stringify([rejectedEmail]), processed]
+    );
+  },
+
+  /**
+   * Purge rejected_emails diagnostics older than retentionHours (default 24h) to enforce data minimization & TTL.
+   */
+  cleanupOldRejectedEmails(retentionHours = 24) {
+    return query(
+      `UPDATE sync_jobs
+       SET rejected_emails = '[]'::jsonb
+       WHERE (completed_at < NOW() - ($1 || ' hours')::interval OR created_at < NOW() - ($1 || ' hours')::interval)
+         AND rejected_emails IS NOT NULL
+         AND rejected_emails != '[]'::jsonb`,
+      [retentionHours]
+    ).then((r) => r.rowCount || 0);
+  },
+
   /**
    * Recover jobs abandoned by a crashed or restarted worker.
    * In-flight rows whose heartbeat is older than the cutoff go back to 'queued'

@@ -25,11 +25,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function reapStaleJobs() {
   const staleAfter = Number(process.env.SYNC_WORKER_STALE_MINUTES) || 5;
+  const retentionHours = Number(process.env.REJECTED_EMAILS_RETENTION_HOURS) || 24;
   lastReapedAt = Date.now();
   const requeued = await EmailSyncRepo.requeueStaleJobs(staleAfter);
   if (requeued > 0) {
     console.log(`[sync-worker] recovered ${requeued} abandoned job(s)`);
   }
+  // Periodically purge old diagnostic rejected email payloads (default 24h retention)
+  await EmailSyncRepo.cleanupOldRejectedEmails(retentionHours).catch((err) => {
+    console.warn(`[sync-worker] rejected email cleanup warning: ${err.message}`);
+  });
 }
 
 async function drain() {

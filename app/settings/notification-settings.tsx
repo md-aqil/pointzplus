@@ -119,7 +119,7 @@ export default function NotificationSettingsScreen() {
     <SafeAreaView edges={["top"]} className="flex-1 bg-[#F7F9FB]">
       <ScreenHeader
         title="Notification & Sync Settings"
-        onBack={() => router.back()}
+        fallbackRoute="/(tabs)/profile"
       />
 
       <ScrollView

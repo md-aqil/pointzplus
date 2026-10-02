@@ -84,20 +84,6 @@ export interface ParsedEmailResult {
   confidence: number;
 }
 
-export interface SyncJob {
-  id: string;
-  userId: string;
-  provider: "gmail" | "outlook" | "yahoo";
-  status: "queued" | "fetching" | "parsing" | "completed" | "failed";
-  totalMessagesFound: number;
-  messagesProcessed: number;
-  programsUpdated: number;
-  errorDetails?: string;
-  startedAt?: string;
-  completedAt?: string;
-}
-
-// ─── Enums ───────────────────────────────────────────────────────
 export type LoyaltyCategory =
   | "airlines"
   | "hotels"

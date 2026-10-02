@@ -23,6 +23,8 @@ import {
   AlertCircle,
   Lock,
   Zap,
+  MailX,
+  ChevronRight,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { usePoints } from "../hooks/usePoints";
@@ -37,6 +39,7 @@ export default function EmailSyncScreen() {
   const { user } = useAuth();
   const { emailAccounts, syncEmail, isSyncing, syncProgress, disconnectEmail } = usePoints();
   const fetchAccountsFromBackend = usePointsStore((s) => s.fetchAccountsFromBackend);
+  const lastSyncRejectedEmails = usePointsStore((s) => s.lastSyncRejectedEmails);
   const [syncSuccessModal, setSyncSuccessModal] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncedCount, setSyncedCount] = useState(0);
@@ -431,6 +434,49 @@ export default function EmailSyncScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Skipped & Rejected Emails Inspector */}
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push("/sync-rejected");
+          }}
+          className="bg-white rounded-2xl p-4 mb-4 border border-border-light flex-row items-center justify-between shadow-sm"
+        >
+          <View className="flex-row items-center flex-1 mr-2">
+            <View className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 items-center justify-center mr-3">
+              <MailX size={18} color="#D97706" />
+            </View>
+            <View className="flex-1">
+              <View className="flex-row items-center">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-xs text-dark"
+                >
+                  Skipped & Unparsed Emails
+                </Text>
+                {(lastSyncRejectedEmails.length > 0 || (syncProgress.rejectedEmails?.length ?? 0) > 0) && (
+                  <View className="ml-2 px-1.5 py-0.5 bg-amber-100 rounded-full">
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                      className="text-[10px] text-amber-800"
+                    >
+                      {syncProgress.rejectedEmails?.length ?? lastSyncRejectedEmails.length}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text
+                style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                className="text-[11px] text-dark-muted mt-0.5"
+              >
+                Inspect emails evaluated as non-loyalty by AI
+              </Text>
+            </View>
+          </View>
+          <ChevronRight size={18} color="#9C9BA2" />
+        </TouchableOpacity>
+
         {/* Security / Privacy details */}
         <View className="bg-white rounded-2xl p-4 border border-border-light">
           <View className="flex-row items-center mb-2">
@@ -489,6 +535,21 @@ export default function EmailSyncScreen() {
                 className="text-white text-sm font-bold"
               >
                 View Updated Dashboard
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                setSyncSuccessModal(false);
+                router.push("/sync-rejected");
+              }}
+              className="w-full bg-slate-100 py-3 rounded-2xl items-center mt-2.5"
+            >
+              <Text
+                style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                className="text-slate-700 text-xs"
+              >
+                Inspect Skipped Emails ({(lastSyncRejectedEmails.length || syncProgress.rejectedEmails?.length || 0)})
               </Text>
             </TouchableOpacity>
           </View>

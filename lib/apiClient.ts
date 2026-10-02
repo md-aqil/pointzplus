@@ -340,10 +340,6 @@ class ApiClient {
     }>('/analytics/portfolio');
   }
 
-  async getExpiringAlerts() {
-    return this.request<any[]>('/alerts/expiring');
-  }
-
   // ─── Notifications ─────────────────────────────────
   async getNotificationSettings() {
     return this.request<any>('/notifications/settings');

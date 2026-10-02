@@ -142,6 +142,52 @@ export function extractDomain(fromHeader) {
   return match ? match[1].toLowerCase() : '';
 }
 
+/**
+ * Redacts personal identifiers, OTP codes, card numbers, and phone numbers from diagnostic text.
+ */
+export function redactSensitiveText(str = '') {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    // Redact 13-19 digit card numbers or spaced/dashed card chunks
+    .replace(/\b(?:\d[ -]*?){13,19}\b/g, '[REDACTED_CARD]')
+    // Redact 4-8 digit OTP codes / PINs / security tokens
+    .replace(/\b(?:otp|code|pin|verification|password|secret)\s*(?:is|:)?\s*[a-zA-Z0-9]{4,8}\b/gi, '[REDACTED_CODE]')
+    // Redact email addresses (mask user part: j***e@domain.com)
+    .replace(/[a-zA-Z0-9_.+-]+@([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)/g, (match, domain) => {
+      const parts = match.split('@');
+      const user = parts[0];
+      const masked = user.length > 2 ? `${user[0]}***${user.slice(-1)}` : '***';
+      return `${masked}@${domain}`;
+    })
+    // Redact phone numbers
+    .replace(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g, '[REDACTED_PHONE]')
+    // Redact bank account numbers (e.g., A/c XX1234, Account No: ...)
+    .replace(/\b(?:a\/c|account|acct)\s*(?:no\.?|number)?\s*[:#-]?\s*[a-zA-Z0-9*_-]{4,20}\b/gi, '[REDACTED_ACCOUNT]')
+    .trim();
+}
+
+/**
+ * Minimizes and sanitizes rejected email diagnostic metadata before DB persistence.
+ */
+export function sanitizeRejectedEmail({ messageId, fromHeader, subjectHeader, dateHeader, preview, parsed, hasAttachments }) {
+  const domain = extractDomain(fromHeader);
+  const senderRedacted = redactSensitiveText(fromHeader).slice(0, 100);
+  const subjectRedacted = redactSensitiveText(subjectHeader || '(No Subject)').slice(0, 150);
+  const previewRedacted = redactSensitiveText(preview || '').slice(0, 120);
+
+  return {
+    messageId: messageId ? crypto.createHash('sha256').update(messageId).digest('hex').slice(0, 16) : undefined,
+    from: senderRedacted,
+    domain: domain || 'unknown',
+    subject: subjectRedacted,
+    receivedAt: new Date(dateHeader).toISOString(),
+    preview: previewRedacted,
+    reason: parsed?.rejectionReason || 'NO_REWARD_SIGNALS',
+    aiNotes: (parsed?.aiNotes || 'No loyalty program or active point balance detected.').slice(0, 200),
+    hasAttachments: Boolean(hasAttachments),
+  };
+}
+
 export function extractBodyParts(payload) {
   let text = '';
   let html = '';
@@ -167,18 +213,21 @@ export function extractBodyParts(payload) {
 }
 
 export function findPdfAttachments(payload) {
-  const pdfs = [];
+  const attachments = [];
   function traverse(part) {
     if (!part) return;
-    const filename = part.filename || '';
-    const isPdf =
-      part.mimeType === 'application/pdf' ||
-      (typeof filename === 'string' && filename.toLowerCase().endsWith('.pdf'));
+    const filename = (part.filename || '').toLowerCase();
+    const mime = (part.mimeType || '').toLowerCase();
+    const isPdf = mime === 'application/pdf' || filename.endsWith('.pdf');
+
     if (isPdf && part.body?.attachmentId) {
-      pdfs.push({
-        filename: filename || 'statement.pdf',
+      attachments.push({
+        filename: part.filename || 'statement.pdf',
+        mimeType: 'application/pdf',
         attachmentId: part.body.attachmentId,
         size: part.body.size || 0,
+        isPdf: true,
+        isImage: false,
       });
     }
     if (part.parts) {
@@ -186,7 +235,60 @@ export function findPdfAttachments(payload) {
     }
   }
   traverse(payload);
-  return pdfs;
+  return attachments;
+}
+
+export function findImageAttachments(payload) {
+  const attachments = [];
+  function traverse(part) {
+    if (!part) return;
+    const filename = (part.filename || '').toLowerCase();
+    const mime = (part.mimeType || '').toLowerCase();
+    const isImage = mime.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/i.test(filename);
+
+    if (isImage && part.body?.attachmentId) {
+      attachments.push({
+        filename: part.filename || 'banner.png',
+        mimeType: mime.startsWith('image/') ? mime : 'image/jpeg',
+        attachmentId: part.body.attachmentId,
+        size: part.body.size || 0,
+        isPdf: false,
+        isImage: true,
+      });
+    }
+    if (part.parts) {
+      for (const p of part.parts) traverse(p);
+    }
+  }
+  traverse(payload);
+  return attachments;
+}
+
+export function findDocumentAndImageAttachments(payload) {
+  const attachments = [];
+  function traverse(part) {
+    if (!part) return;
+    const filename = (part.filename || '').toLowerCase();
+    const mime = (part.mimeType || '').toLowerCase();
+    const isPdf = mime === 'application/pdf' || filename.endsWith('.pdf');
+    const isImage = mime.startsWith('image/') || /\.(png|jpe?g|webp|bmp)$/i.test(filename);
+
+    if ((isPdf || isImage) && part.body?.attachmentId) {
+      attachments.push({
+        filename: part.filename || (isPdf ? 'statement.pdf' : 'banner.png'),
+        mimeType: isPdf ? 'application/pdf' : (mime.startsWith('image/') ? mime : 'image/jpeg'),
+        attachmentId: part.body.attachmentId,
+        size: part.body.size || 0,
+        isPdf,
+        isImage,
+      });
+    }
+    if (part.parts) {
+      for (const p of part.parts) traverse(p);
+    }
+  }
+  traverse(payload);
+  return attachments;
 }
 
 async function fetchAttachmentData(gmail, messageId, attachmentId) {
@@ -279,9 +381,9 @@ async function fetchMessageWithBackoff(gmail, id) {
   throw lastErr;
 }
 
-// Maximum matching messages to scan. Defaults to 500 matching statements.
+// Maximum matching messages to scan. Defaults to 100 matching statements for fast responsive syncing.
 // Can be set higher via SYNC_MAX_RESULTS if needed.
-const DEFAULT_MAX_RESULTS = 500;
+const DEFAULT_MAX_RESULTS = 100;
 
 function resolveMaxResults() {
   const override = Number.parseInt(process.env.SYNC_MAX_RESULTS || '', 10);
@@ -388,6 +490,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
   }
 
   const detectedAccounts = [];
+  const rejectedEmails = [];
   let programsAdded = 0;
   let programsUpdated = 0;
   let processed = 0;
@@ -403,18 +506,21 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
       const { text, html } = extractBodyParts(detail.data.payload);
       const preview = (text || html.replace(/<[^>]+>/g, ' ')).substring(0, 200);
 
-      const pdfMetaList = findPdfAttachments(detail.data.payload);
-      const pdfAttachments = [];
+      const attachmentMetaList = findDocumentAndImageAttachments(detail.data.payload);
+      const attachments = [];
 
-      // Download attached statement PDFs (up to 2 per message, max 10MB each)
-      if (pdfMetaList.length > 0) {
-        for (const meta of pdfMetaList.slice(0, 2)) {
+      // Download attached statement PDFs and promotional banners (up to 2 per message, max 10MB each)
+      if (attachmentMetaList.length > 0) {
+        for (const meta of attachmentMetaList.slice(0, 2)) {
           if (meta.size && meta.size > 10 * 1024 * 1024) continue;
           const base64Data = await fetchAttachmentData(gmail, msg.id, meta.attachmentId);
           if (base64Data) {
-            pdfAttachments.push({
+            attachments.push({
               filename: meta.filename,
+              mimeType: meta.mimeType,
               base64Data,
+              isPdf: meta.isPdf,
+              isImage: meta.isImage,
             });
           }
         }
@@ -427,7 +533,8 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
         bodyText: text,
         bodyHtml: html,
         receivedDate: dateHeader,
-        pdfAttachments,
+        pdfAttachments: attachments,
+        attachments,
       });
 
       if (parsed.isLoyaltyStatement && parsed.loyaltyData) {
@@ -462,6 +569,22 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
             foundAt: detectionObj.foundAt,
           }, processed + 1);
         }
+      } else {
+        const rejectedObj = sanitizeRejectedEmail({
+          messageId: msg.id,
+          fromHeader,
+          subjectHeader,
+          dateHeader,
+          preview,
+          parsed,
+          hasAttachments: attachments.length > 0,
+        });
+        rejectedEmails.push(rejectedObj);
+
+        // Stream sanitized rejected diagnostic to sync_jobs (capped at 100 entries)
+        if (jobId && rejectedEmails.length <= 100) {
+          await EmailSyncRepo.recordRejectedEmail(jobId, rejectedObj, processed + 1);
+        }
       }
 
       processed += 1;
@@ -489,6 +612,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
     programsAdded,
     programsUpdated,
     accounts: detectedAccounts,
+    rejectedEmails,
   };
 }
 

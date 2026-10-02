@@ -57,35 +57,54 @@ export default function DealsScreen() {
   const [deals, setDeals] = useState<DealItem[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; icon: string }[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [searchInput, setSearchInput] = useState("");
+  // Debounced query: every keystroke must NOT hit the network.
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [expandedTermsId, setExpandedTermsId] = useState<string | null>(null);
 
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Categories load once — NOT on every deals refetch (avoids the refetch loop).
+  useEffect(() => {
+    let active = true;
+    apiClient
+      .getDealCategories()
+      .then((cats) => {
+        if (active && Array.isArray(cats)) setCategories(cats);
+      })
+      .catch((err) => {
+        if (__DEV__) {
+          console.warn("[DealsScreen] Failed to load deal categories:", err?.message);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const fetchDeals = useCallback(async () => {
     try {
-      const [dealsRes, catsRes] = await Promise.all([
-        apiClient.getDeals({
-          category: selectedCategory,
-          q: searchQuery,
-        }),
-        categories.length === 0 ? apiClient.getDealCategories() : Promise.resolve(null),
-      ]);
+      const dealsRes = await apiClient.getDeals({
+        category: selectedCategory,
+        q: searchQuery,
+      });
 
       if (dealsRes?.deals) {
         setDeals(dealsRes.deals);
       }
-      if (catsRes && Array.isArray(catsRes)) {
-        setCategories(catsRes);
-      }
     } catch (err) {
-      console.warn("Failed to fetch deals:", err);
+      if (__DEV__) console.warn("Failed to fetch deals:", err);
     } finally {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, [selectedCategory, searchQuery, categories.length]);
+  }, [selectedCategory, searchQuery]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -162,14 +181,14 @@ export default function DealsScreen() {
             <TextInput
               placeholder="Search stores, coupons or deals..."
               placeholderTextColor="#9C9BA2"
-              value={searchQuery}
-              onChangeText={(text) => setSearchQuery(text)}
+              value={searchInput}
+              onChangeText={(text) => setSearchInput(text)}
               style={{ fontFamily: "PlusJakartaSans-Regular" }}
               className="flex-1 text-[14px] text-dark py-0"
             />
-            {searchQuery ? (
+            {searchInput ? (
               <TouchableOpacity
-                onPress={() => setSearchQuery("")}
+                onPress={() => setSearchInput("")}
                 className="p-1"
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >

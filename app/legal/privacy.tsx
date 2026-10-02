@@ -13,7 +13,7 @@ export default function PrivacyPolicyScreen() {
     <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">
       <ScreenHeader
         title="Privacy & Policy"
-        onBack={() => router.back()}
+        fallbackRoute="/(tabs)/profile"
       />
 
       <ScrollView

@@ -94,3 +94,13 @@ pointzplus-mobile/
   - `borderLight`: `#E6E6E8`
 - **Typography**: `Plus Jakarta Sans` across all headings, body, labels, and CTAs (weights 400, 500, 600, 700).
 - **Backend Architecture**: Local PostgreSQL database accessed through the Express API in `server/` (no third-party BaaS).
+
+---
+
+## Mandatory Reading for Every Contributor (human or AI)
+
+> **Read `CODE_GUARDRAILS.md` (repo root) BEFORE writing any code.** It is the
+> binding DO/DON'T companion to this file — born from the Oct 2026 audit that
+> found duplicated logic, un-memoized selectors, shipped mock data, and dead
+> deps. `AGENTS.md` tells you *what the architecture is*;
+> `CODE_GUARDRAILS.md` tells you *what mistakes to never repeat*.

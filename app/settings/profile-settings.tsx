@@ -74,7 +74,7 @@ export default function ProfileSettingsScreen() {
       {/* Centered Profile Settings Header */}
       <ScreenHeader
         title="Profile Settings"
-        onBack={() => router.back()}
+        fallbackRoute="/(tabs)/profile"
       />
 
       <KeyboardAvoidingView

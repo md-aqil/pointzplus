@@ -1,7 +1,7 @@
 // components/ui/ScreenHeader.tsx
 import React from "react";
 import { View, Text, TouchableOpacity, Platform } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, Href } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 
@@ -10,6 +10,7 @@ interface ScreenHeaderProps {
   subtitle?: string;
   showBack?: boolean;
   onBack?: () => void;
+  fallbackRoute?: Href;
   rightAction?: React.ReactNode;
   transparent?: boolean;
 }
@@ -19,6 +20,7 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
   subtitle,
   showBack = true,
   onBack,
+  fallbackRoute = "/(tabs)/home",
   rightAction,
   transparent = false,
 }) => {
@@ -34,7 +36,7 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
     } else if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace("/(tabs)/profile");
+      router.replace(fallbackRoute);
     }
   };
 

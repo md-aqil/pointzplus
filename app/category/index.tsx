@@ -16,7 +16,7 @@ export default function AllCategoriesScreen() {
       <ScreenHeader
         title="All Category"
         subtitle="Points by category"
-        onBack={() => router.back()}
+        fallbackRoute="/(tabs)/home"
       />
 
       <ScrollView

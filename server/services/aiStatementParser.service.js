@@ -6,15 +6,14 @@
 // deterministic StatementParser rules engine.
 
 import crypto from 'crypto';
+import zlib from 'zlib';
 import { StatementParser } from './statementParser.js';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
-const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
-const NVIDIA_MODEL = process.env.NVIDIA_MODEL || 'deepseek-ai/deepseek-v4.1-flash';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const CATEGORY_COLORS = {
   airlines: '#01A2FB',
@@ -51,9 +50,9 @@ const CATEGORY_ALIASES = {
 };
 
 // A provider that hangs or rate-limits must not stall the whole scan worker,
-// so every AI call is bounded by a timeout and retried with backoff.
-const AI_TIMEOUT_MS = Math.max(1, Number.parseInt(process.env.AI_TIMEOUT_MS || '20000', 10) || 20000);
-const AI_MAX_RETRIES = Math.max(0, Number.parseInt(process.env.AI_MAX_RETRIES || '2', 10) || 2);
+// so every AI call is bounded by a strict 7s timeout with 1 fast retry.
+const AI_TIMEOUT_MS = Math.max(1, Number.parseInt(process.env.AI_TIMEOUT_MS || '7000', 10) || 7000);
+const AI_MAX_RETRIES = Math.max(0, Number.parseInt(process.env.AI_MAX_RETRIES || '1', 10) || 1);
 const aiSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchWithTimeout(url, options, timeoutMs = AI_TIMEOUT_MS) {
@@ -155,11 +154,13 @@ export class AIStatementParser {
         messageIdHash,
         isLoyaltyStatement: false,
         loyaltyData: null,
+        rejectionReason: 'NO_REWARD_SIGNALS',
+        aiNotes: 'No loyalty, points, miles, or balance keywords detected in subject or email body.',
       };
     }
 
     // 3. If AI credentials are present, attempt AI structured extraction (including PDFs)
-    if (GEMINI_API_KEY || OPENROUTER_API_KEY || OPENAI_API_KEY || DEEPSEEK_API_KEY) {
+    if (GEMINI_API_KEY || DEEPSEEK_API_KEY || OPENAI_API_KEY) {
       try {
         const aiResult = await this.extractWithAI({
           fromHeader,
@@ -170,45 +171,67 @@ export class AIStatementParser {
           pdfAttachments,
         });
 
-        if (aiResult && aiResult.is_loyalty_statement && typeof aiResult.current_balance === 'number') {
-          const balance = Math.round(aiResult.current_balance);
-          if (balance >= 0 && balance < 50_000_000) {
-            const category = CATEGORY_ALIASES[aiResult.category] || 'shopping';
-            const programName = aiResult.program_name || aiResult.brand_name || 'Loyalty Program';
+        if (aiResult) {
+          if (aiResult.is_loyalty_statement && typeof aiResult.current_balance === 'number') {
+            const balance = Math.round(aiResult.current_balance);
+            if (balance >= 0 && balance < 50_000_000) {
+              const category = CATEGORY_ALIASES[aiResult.category] || 'shopping';
+              const programName = aiResult.program_name || aiResult.brand_name || 'Loyalty Program';
 
-            let expiryDate = null;
-            if (aiResult.expiry_date) {
-              const d = new Date(aiResult.expiry_date);
-              if (!isNaN(d.getTime())) {
-                expiryDate = d.toISOString();
+              let expiryDate = null;
+              if (aiResult.expiry_date) {
+                const d = new Date(aiResult.expiry_date);
+                if (!isNaN(d.getTime())) {
+                  expiryDate = d.toISOString();
+                }
               }
-            }
 
-            return {
-              messageIdHash,
-              isLoyaltyStatement: true,
-              source: pdfAttachments.length > 0 ? 'ai_pdf_extractor' : 'ai_extractor',
-              loyaltyData: {
-                programId: (aiResult.brand_name || 'program')
-                  .toLowerCase()
-                  .replace(/[^a-z0-9]+/g, '_'),
-                programName,
-                brandName: aiResult.brand_name || programName,
-                category,
-                accentColor: CATEGORY_COLORS[category] || '#01A2FB',
-                pointValueINR: DEFAULT_POINT_VALUE_INR,
-                balance,
-                accountNumber: aiResult.membership_id || 'MEMBER-***',
-                expiringPoints: Math.max(0, Math.round(aiResult.expiring_points || 0)),
-                expiryDate,
-                confidence: Math.min(1, Math.max(0.7, Number(aiResult.confidence_score) || 0.95)),
-                sourceDate: receivedDate,
-              },
-            };
+              return {
+                messageIdHash,
+                isLoyaltyStatement: true,
+                source: pdfAttachments.length > 0 ? 'ai_pdf_extractor' : 'ai_extractor',
+                loyaltyData: {
+                  programId: (aiResult.brand_name || 'program')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '_'),
+                  programName,
+                  brandName: aiResult.brand_name || programName,
+                  category,
+                  accentColor: CATEGORY_COLORS[category] || '#01A2FB',
+                  pointValueINR: DEFAULT_POINT_VALUE_INR,
+                  balance,
+                  accountNumber: aiResult.membership_id || 'MEMBER-***',
+                  expiringPoints: Math.max(0, Math.round(aiResult.expiring_points || 0)),
+                  expiryDate,
+                  confidence: Math.min(1, Math.max(0.7, Number(aiResult.confidence_score) || 0.95)),
+                  sourceDate: receivedDate,
+                },
+              };
+            }
           }
+
+          // If AI parsed the message but concluded it's not a loyalty statement or had no valid balance
+          return {
+            messageIdHash,
+            isLoyaltyStatement: false,
+            loyaltyData: null,
+            rejectionReason: aiResult.is_loyalty_statement ? 'NO_VALID_BALANCE' : 'AI_NON_LOYALTY',
+            aiNotes:
+              aiResult.reason ||
+              (aiResult.is_loyalty_statement
+                ? `AI recognized ${aiResult.brand_name || 'loyalty program'} but found no valid numeric balance.`
+                : 'AI examined message content and determined it is not an active points balance statement.'),
+          };
         }
       } catch (aiErr) {
         console.warn(`[AIStatementParser] AI extraction error on message ${messageId}:`, aiErr.message);
+        return {
+          messageIdHash,
+          isLoyaltyStatement: false,
+          loyaltyData: null,
+          rejectionReason: 'AI_ERROR',
+          aiNotes: `AI analysis timed out or failed: ${aiErr.message}`,
+        };
       }
     }
 
@@ -216,34 +239,115 @@ export class AIStatementParser {
       messageIdHash,
       isLoyaltyStatement: false,
       loyaltyData: null,
+      rejectionReason: 'NO_LOYALTY_DATA',
+      aiNotes: 'No matching loyalty rules and AI service was not configured.',
     };
   }
 
   /**
-   * LLM Extraction using Gemini API (with multimodal PDF support), OpenAI API, or DeepSeek API
+   * Robust raw text extractor for digital PDF statements (supports uncompressed & FlateDecode streams)
    */
-  static async extractWithAI({ fromHeader, subjectHeader, bodyText, bodyHtml, receivedDate, pdfAttachments = [] }) {
-    const cleanBody = (bodyText || bodyHtml.replace(/<[^>]+>/g, ' '))
+  static extractTextFromPdfBase64(base64Data) {
+    if (!base64Data || typeof base64Data !== 'string') return '';
+    try {
+      const buffer = Buffer.from(base64Data, 'base64');
+      const raw = buffer.toString('binary');
+      const textChunks = [];
+
+      // 1. Extract and decompress all FlateDecode streams inside the PDF
+      const streamRegex = /stream[\r\n]+([\s\S]*?)[\r\n]+endstream/g;
+      let match;
+      while ((match = streamRegex.exec(raw)) !== null) {
+        const streamData = match[1];
+        try {
+          const decompressed = zlib.inflateSync(Buffer.from(streamData, 'binary')).toString('binary');
+          this.extractTextFromPdfStream(decompressed, textChunks);
+        } catch {
+          // Plain or uncompressed stream
+          this.extractTextFromPdfStream(streamData, textChunks);
+        }
+      }
+
+      // 2. Also search top-level text objects in raw stream
+      this.extractTextFromPdfStream(raw, textChunks);
+
+      const extracted = textChunks
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      return extracted.length > 20 ? extracted.slice(0, 5000) : '';
+    } catch {
+      return '';
+    }
+  }
+
+  static extractTextFromPdfStream(streamStr, chunks) {
+    if (!streamStr || typeof streamStr !== 'string') return;
+    const unescapePdf = (str) =>
+      str
+        .replace(/\\([0-9]{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
+        .replace(/\\[nrtbf]/g, ' ')
+        .replace(/\\(.)/g, '$1');
+
+    // Standard string operations: (text) Tj
+    const singleMatches = streamStr.match(/\(([^()]*)\)\s*T[jJ]/g) || [];
+    for (const m of singleMatches) {
+      const cleaned = m.replace(/^[(]/, '').replace(/[)]\s*T[jJ]$/, '');
+      if (cleaned.trim()) chunks.push(unescapePdf(cleaned));
+    }
+
+    // Array string operations: [ (text1) 20 (text2) ] TJ
+    const arrayMatches = streamStr.match(/\[(.*?)\]\s*TJ/g) || [];
+    for (const m of arrayMatches) {
+      const innerStrings = m.match(/\(([^()]*)\)/g) || [];
+      const joined = innerStrings.map((s) => s.slice(1, -1)).join('');
+      if (joined.trim()) chunks.push(unescapePdf(joined));
+    }
+  }
+
+  /**
+   * LLM Extraction using DeepSeek-V3 (for Text, HTML & PDFs) with Gemini 2.0 Flash (for Images & Complex PDFs)
+   */
+  static async extractWithAI({ fromHeader, subjectHeader, bodyText, bodyHtml, receivedDate, pdfAttachments = [], attachments = [] }) {
+    const allAttachments = Array.isArray(attachments) && attachments.length > 0 ? attachments : (pdfAttachments || []);
+    
+    // Extract text from attached PDFs so DeepSeek can read all statement data directly
+    let pdfTextContent = '';
+    const imageAttachments = [];
+    const rawPdfAttachments = [];
+
+    for (const att of allAttachments) {
+      if (att.isPdf || att.filename?.toLowerCase().endsWith('.pdf') || att.mimeType === 'application/pdf') {
+        rawPdfAttachments.push(att);
+        if (att.base64Data) {
+          const text = this.extractTextFromPdfBase64(att.base64Data);
+          if (text) pdfTextContent += `\n[Attached PDF (${att.filename || 'statement.pdf'}) Content]:\n${text}\n`;
+        }
+      } else if (att.isImage || att.mimeType?.startsWith('image/')) {
+        imageAttachments.push(att);
+      }
+    }
+
+    const cleanBody = `${bodyText || bodyHtml.replace(/<[^>]+>/g, ' ')}\n${pdfTextContent}`
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 2500);
+      .slice(0, 4000);
 
-    const hasPdfs = Array.isArray(pdfAttachments) && pdfAttachments.length > 0;
-    const attachmentNote = hasPdfs
-      ? `\nAttached Files: ${pdfAttachments.map((p) => p.filename || 'statement.pdf').join(', ')} (Please analyze the attached PDF statement content for points balances, account IDs, and expiry dates).`
-      : '';
+    const hasImages = imageAttachments.length > 0 && imageAttachments.some((a) => a.base64Data);
+    const hasUnreadPdfs = rawPdfAttachments.length > 0 && !pdfTextContent && rawPdfAttachments.some((a) => a.base64Data);
 
     const prompt = `You are a precision loyalty rewards, air miles, and points parser.
-Analyze this email ${hasPdfs ? 'and its attached statement document(s)' : ''} to extract loyalty balances and reward updates in any format.
+Analyze this email and statement data to extract loyalty balances and reward updates in any format.
 
 Email Metadata:
 From: ${fromHeader}
 Subject: ${subjectHeader}
-Received Date: ${receivedDate}${attachmentNote}
+Received Date: ${receivedDate}
 
-Email Content:
+Email & Statement Content:
 """
-${cleanBody || '(See attached PDF document)'}
+${cleanBody || '(See attached image/PDF document)'}
 """
 
 Instructions & Loyalty Formats to Recognize:
@@ -266,6 +370,7 @@ Instructions & Loyalty Formats to Recognize:
 Respond ONLY with valid JSON conforming to this schema:
 {
   "is_loyalty_statement": boolean,
+  "reason": string (brief explanation of why this was or was not identified as a loyalty points statement),
   "brand_name": string (e.g. "Flipkart", "Air India", "InterMiles", "Myntra", "Marriott", "HDFC Bank", "ICICI Bank", "SBI Card", "Axis Bank", "Tata Neu", "Starbucks", "CRED", "Vistara"),
   "program_name": string (e.g. "SuperCoins", "Flying Returns", "EDGE Rewards", "NeuCoins", "Starbucks Rewards", "CRED Coins", "Regalia Reward Points"),
   "category": "airlines" | "hotels" | "banking" | "shopping" | "dining" | "fuel" | "supermarket" | "entertainment" | "travel" | "other",
@@ -277,35 +382,43 @@ Respond ONLY with valid JSON conforming to this schema:
   "confidence_score": number (0.0 to 1.0)
 }`;
 
-    // Priority routing: Gemini (native PDF) -> NVIDIA DeepSeek -> OpenRouter (free/byok) -> OpenAI -> DeepSeek
-    if (GEMINI_API_KEY) {
-      return this.callGemini(prompt, pdfAttachments);
-    } else if (NVIDIA_API_KEY) {
-      return this.callNvidiaDeepSeek(prompt, pdfAttachments);
-    } else if (OPENROUTER_API_KEY) {
-      return this.callOpenRouter(prompt);
+    // Routing Logic:
+    // 1. If images or unread binary PDFs are attached AND GEMINI_API_KEY is present -> use Gemini 2.0 Flash Vision
+    // 2. For all Text, HTML, and extracted PDF Statements -> use DeepSeek-V3 (deepseek-chat)
+    // 3. Fallback to Gemini 2.0 Flash if DeepSeek is not configured
+    if ((hasImages || hasUnreadPdfs) && GEMINI_API_KEY) {
+      return this.callGemini(prompt, hasImages ? imageAttachments : rawPdfAttachments);
+    } else if (DEEPSEEK_API_KEY && cleanBody) {
+      return this.callDeepSeek(prompt);
+    } else if (GEMINI_API_KEY) {
+      return this.callGemini(prompt, allAttachments);
+    } else if (hasUnreadPdfs) {
+      // PDF was attached but could not be decompressed/read and no vision multimodal fallback was configured
+      return {
+        is_loyalty_statement: false,
+        reason: 'PDF_UNREADABLE',
+      };
     } else if (OPENAI_API_KEY) {
       return this.callOpenAI(prompt);
-    } else if (DEEPSEEK_API_KEY) {
-      return this.callDeepSeek(prompt);
     }
     return null;
   }
 
-  static async callGemini(prompt, pdfAttachments = []) {
+  static async callGemini(prompt, attachments = []) {
     const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
 
     const parts = [];
 
-    // Multimodal PDF Ingestion
-    if (Array.isArray(pdfAttachments)) {
-      for (const pdf of pdfAttachments.slice(0, 3)) {
-        if (pdf.base64Data) {
+    // Multimodal PDF & Image Attachment Ingestion
+    if (Array.isArray(attachments)) {
+      for (const att of attachments.slice(0, 3)) {
+        if (att.base64Data) {
+          const mimeType = att.mimeType || (att.filename?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
           parts.push({
             inline_data: {
-              mime_type: 'application/pdf',
-              data: pdf.base64Data,
+              mime_type: mimeType,
+              data: att.base64Data,
             },
           });
         }
@@ -332,72 +445,6 @@ Respond ONLY with valid JSON conforming to this schema:
     return JSON.parse(candidateText);
   }
 
-  static async callNvidiaDeepSeek(prompt, pdfAttachments = []) {
-    const url = `${NVIDIA_BASE_URL.replace(/\/+$/, '')}/chat/completions`;
-    const response = await callProvider('NvidiaDeepSeek', url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${NVIDIA_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: NVIDIA_MODEL,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.1,
-      }),
-    });
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return null;
-
-    const match = content.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    return JSON.parse(match[0]);
-  }
-
-  static async callOpenRouter(prompt) {
-    const candidateModels = [
-      process.env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-lite:free',
-      'meta-llama/llama-3.3-70b-instruct:free',
-      'qwen/qwen-2.5-72b-instruct:free',
-      'openrouter/free',
-    ];
-    const url = 'https://openrouter.ai/api/v1/chat/completions';
-
-    for (const model of candidateModels) {
-      try {
-        const response = await fetchWithTimeout(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-            'HTTP-Referer': 'https://pointzplus.app',
-            'X-Title': 'PointzPlus',
-          },
-          body: JSON.stringify({
-            model,
-            messages: [{ role: 'user', content: prompt }],
-            temperature: 0.1,
-          }),
-        }, 8000);
-
-        if (!response.ok) continue;
-
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content;
-        if (!content) continue;
-
-        const match = content.match(/\{[\s\S]*\}/);
-        if (!match) continue;
-        return JSON.parse(match[0]);
-      } catch {
-        // try next candidate model
-      }
-    }
-    return null;
-  }
-
   static async callOpenAI(prompt) {
     const url = 'https://api.openai.com/v1/chat/completions';
     const response = await callProvider('OpenAI', url, {
@@ -421,7 +468,7 @@ Respond ONLY with valid JSON conforming to this schema:
   }
 
   static async callDeepSeek(prompt) {
-    const url = 'https://api.deepseek.com/chat/completions';
+    const url = `${DEEPSEEK_BASE_URL.replace(/\/+$/, '')}/chat/completions`;
     const response = await callProvider('DeepSeek', url, {
       method: 'POST',
       headers: {
@@ -429,8 +476,14 @@ Respond ONLY with valid JSON conforming to this schema:
         Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
       },
       body: JSON.stringify({
-        model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-        messages: [{ role: 'user', content: prompt }],
+        model: DEEPSEEK_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a precision loyalty rewards and financial points extraction engine. Return ONLY valid JSON matching the requested schema.',
+          },
+          { role: 'user', content: prompt },
+        ],
         response_format: { type: 'json_object' },
         temperature: 0.1,
       }),

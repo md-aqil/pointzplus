@@ -31,7 +31,7 @@ export default function SearchScreen() {
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">
-      <ScreenHeader title="Search" onBack={() => router.back()} />
+      <ScreenHeader title="Search" fallbackRoute="/(tabs)/home" />
 
       <View className="px-5 pt-2">
         <Input

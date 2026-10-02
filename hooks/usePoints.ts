@@ -1,14 +1,20 @@
-import { usePointsStore } from "../store/pointsStore";
+import { useMemo } from "react";
+import {
+  usePointsStore,
+  computeDashboardSummary,
+  computeCategorySummaries,
+  computeExpiringAccounts,
+} from "../store/pointsStore";
 import { useAuthStore } from "../store/authStore";
+
 export function usePoints() {
   const user = useAuthStore((state) => state.user);
   const accounts = usePointsStore((state) => state.accounts);
+  const transactions = usePointsStore((state) => state.transactions);
+  const monthlyFlows = usePointsStore((state) => state.monthlyFlows);
   const emailAccounts = usePointsStore((state) => state.emailAccounts);
   const isSyncing = usePointsStore((state) => state.isSyncing);
   const syncProgress = usePointsStore((state) => state.syncProgress);
-  const getDashboardSummary = usePointsStore((state) => state.getDashboardSummary);
-  const getCategorySummaries = usePointsStore((state) => state.getCategorySummaries);
-  const getExpiringAccounts = usePointsStore((state) => state.getExpiringAccounts);
   const addManualAccount = usePointsStore((state) => state.addManualAccount);
   const syncEmail = usePointsStore((state) => state.syncEmail);
   const deleteAccount = usePointsStore((state) => state.deleteAccount);
@@ -18,9 +24,20 @@ export function usePoints() {
   const notifications = usePointsStore((state) => state.notifications);
   const fetchNotificationsFromBackend = usePointsStore((state) => state.fetchNotificationsFromBackend);
   const acknowledgeNotification = usePointsStore((state) => state.acknowledgeNotification);
-  const summary = getDashboardSummary();
-  const categorySummaries = getCategorySummaries();
-  const expiringAccounts = getExpiringAccounts();
+
+  // Pure memoized derivations: calculated directly from input states without store closure ambiguity
+  const summary = useMemo(
+    () => computeDashboardSummary(accounts, transactions, monthlyFlows),
+    [accounts, transactions, monthlyFlows]
+  );
+  const categorySummaries = useMemo(
+    () => computeCategorySummaries(accounts),
+    [accounts]
+  );
+  const expiringAccounts = useMemo(
+    () => computeExpiringAccounts(accounts),
+    [accounts]
+  );
 
   return {
     summary,

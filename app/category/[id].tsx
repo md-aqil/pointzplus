@@ -37,8 +37,6 @@ export default function CategoryDetailScreen() {
       id: categoryId,
       name: categoryId.charAt(0).toUpperCase() + categoryId.slice(1),
       iconName: "Layers",
-      brandCount: 0,
-      totalPoints: 0,
       accentColor: "#9C4EBD",
       bgColor: "#FDF4FF",
     };
@@ -88,7 +86,11 @@ export default function CategoryDetailScreen() {
         <TouchableOpacity
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.back();
+            if (router.canGoBack()) {
+              router.back();
+            } else {
+              router.replace("/category");
+            }
           }}
           className="w-11 h-11 rounded-2xl bg-[#E6F6FF] items-center justify-center border border-[#E6F6FF]"
           activeOpacity={0.8}

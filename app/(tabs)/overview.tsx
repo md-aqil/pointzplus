@@ -40,8 +40,8 @@ export default function OverviewScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await refreshAll();
-    setTimeout(() => setRefreshing(false), 500);
+    await refreshAll(true);
+    setRefreshing(false);
   };
 
   // Compute dynamic segments from real categories
