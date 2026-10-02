@@ -8,7 +8,15 @@ import {
   CategorySummary,
   LoyaltyCategory,
 } from "../types/loyalty";
-import { NotificationItem, SyncJob, SyncJobStatus, LiveDetection, RejectedEmail, BackendLinkedAccount } from "../types/models";
+import {
+  NotificationItem,
+  SyncJob,
+  SyncJobStatus,
+  LiveDetection,
+  RejectedEmail,
+  BackendLinkedAccount,
+  ParsedEmailStatement,
+} from "../types/models";
 import { POPULAR_PROGRAMS, CATEGORY_LABELS } from "../constants/popularPrograms";
 import { apiClient } from "../lib/apiClient";
 import { notifyPointsEarned } from "../services/pushNotifications";
@@ -184,6 +192,11 @@ interface PointsState {
   syncProgress: SyncProgress;
   lastSyncRejectedEmails: RejectedEmail[];
   setLastSyncRejectedEmails: (emails: RejectedEmail[]) => void;
+  parsedStatements: ParsedEmailStatement[];
+  isBackfillRunning: boolean;
+  activeJobDetails: SyncJob | null;
+  fetchParsedStatements: (limit?: number) => Promise<ParsedEmailStatement[]>;
+  checkActiveSyncStatus: () => Promise<void>;
   /**
    * Current-month credit/debit totals as aggregated by the server.
    * Null until the first successful load, so the UI can tell "0 this month"
@@ -358,6 +371,9 @@ export const usePointsStore = create<PointsState>((set, get) => ({
   syncProgress: { step: "Ready", percent: 0, rejectedEmails: [] },
   lastSyncRejectedEmails: [],
   setLastSyncRejectedEmails: (emails) => set({ lastSyncRejectedEmails: emails }),
+  parsedStatements: [],
+  isBackfillRunning: false,
+  activeJobDetails: null,
   monthlyFlows: null,
 
   // ─── Selectors ──────────────────────────────────────────────────
@@ -626,6 +642,42 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     }));
   },
 
+  fetchParsedStatements: async (limit = 200) => {
+    try {
+      const statements = await apiClient.getEmailStatements(limit);
+      if (Array.isArray(statements)) {
+        set({ parsedStatements: statements });
+        return statements;
+      }
+      return [];
+    } catch (e) {
+      console.warn("[pointsStore] fetchParsedStatements error:", e);
+      return [];
+    }
+  },
+
+  checkActiveSyncStatus: async () => {
+    try {
+      const res = await apiClient.getActiveSyncJob();
+      if (res && res.activeJob) {
+        set({
+          isBackfillRunning: res.isSyncing,
+          activeJobDetails: res.activeJob,
+        });
+        if (Array.isArray(res.activeJob.rejected_emails) && res.activeJob.rejected_emails.length > 0) {
+          set({ lastSyncRejectedEmails: res.activeJob.rejected_emails });
+        }
+      } else {
+        set({
+          isBackfillRunning: false,
+          activeJobDetails: null,
+        });
+      }
+    } catch {
+      // Ignored
+    }
+  },
+
   refreshAll: async (force = false) => {
     const needsAccounts = force || !isResourceFresh("accounts");
     const needsNotifications = force || !isResourceFresh("notifications");
@@ -642,6 +694,7 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       if (needsAccounts) tasks.push(get().fetchAccountsFromBackend(force));
       if (needsNotifications) tasks.push(get().fetchNotificationsFromBackend(force));
       if (needsPortfolio) tasks.push(get().fetchPortfolioFromBackend(force));
+      tasks.push(get().checkActiveSyncStatus());
 
       await Promise.all(tasks);
     } finally {
@@ -661,6 +714,9 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       isSyncing: false,
       syncProgress: { step: "Ready", percent: 0, rejectedEmails: [] },
       lastSyncRejectedEmails: [],
+      parsedStatements: [],
+      isBackfillRunning: false,
+      activeJobDetails: null,
       monthlyFlows: null,
     });
   },

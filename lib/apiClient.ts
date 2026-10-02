@@ -6,6 +6,7 @@ import type {
   BackendPortfolioSummary,
   BackendCategoryBreakdown,
   SyncJob,
+  ParsedEmailStatement,
 } from '../types/models';
 
 /**
@@ -279,6 +280,14 @@ class ApiClient {
 
   async getSyncJob(jobId: string) {
     return this.request<SyncJob>(`/email-sync/jobs/${jobId}`);
+  }
+
+  async getActiveSyncJob() {
+    return this.request<{ activeJob: SyncJob | null; isSyncing: boolean }>('/email-sync/active-job');
+  }
+
+  async getEmailStatements(limit = 200) {
+    return this.request<ParsedEmailStatement[]>(`/email-sync/statements?limit=${limit}`);
   }
 
   async enableGmailWatch() {

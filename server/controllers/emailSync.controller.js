@@ -1,4 +1,3 @@
-// server/controllers/emailSync.controller.js – HTTP layer for Gmail sync.
 import {
   gmailService,
   oauthConfigured,
@@ -6,6 +5,7 @@ import {
   verifyOAuthState,
   isAuthorizedPubSubRequest,
 } from '../services/gmail.service.js';
+import { EmailSyncRepo } from '../repositories/emailSync.repo.js';
 import { asyncHandler, ApiError } from '../lib/errors.js';
 
 const APP_DEEP_LINK =
@@ -166,5 +166,16 @@ export const emailSyncController = {
     gmailService.handleWebhook(req.body).catch((err) => {
       console.error('Gmail webhook error:', err.message);
     });
+  }),
+
+  listStatements: asyncHandler(async (req, res) => {
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
+    const statements = await EmailSyncRepo.listEmailStatements(req.userId, limit);
+    res.json(statements);
+  }),
+
+  getActiveJob: asyncHandler(async (req, res) => {
+    const job = await EmailSyncRepo.findAnyActiveJob(req.userId);
+    res.json({ activeJob: job || null, isSyncing: Boolean(job) });
   }),
 };

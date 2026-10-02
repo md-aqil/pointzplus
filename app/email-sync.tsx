@@ -25,6 +25,7 @@ import {
   Zap,
   MailX,
   ChevronRight,
+  Sparkles,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { usePoints } from "../hooks/usePoints";
@@ -37,7 +38,16 @@ export default function EmailSyncScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ connected?: string }>();
   const { user } = useAuth();
-  const { emailAccounts, syncEmail, isSyncing, syncProgress, disconnectEmail } = usePoints();
+  const {
+    emailAccounts,
+    syncEmail,
+    isSyncing,
+    syncProgress,
+    disconnectEmail,
+    isBackfillRunning,
+    activeJobDetails,
+    checkActiveSyncStatus,
+  } = usePoints();
   const fetchAccountsFromBackend = usePointsStore((s) => s.fetchAccountsFromBackend);
   const lastSyncRejectedEmails = usePointsStore((s) => s.lastSyncRejectedEmails);
   const [syncSuccessModal, setSyncSuccessModal] = useState(false);
@@ -46,6 +56,15 @@ export default function EmailSyncScreen() {
   const [isConnecting, setIsConnecting] = useState(false);
   const autoScannedAccountsRef = useRef<Set<string>>(new Set());
   const lastDetectionsCountRef = useRef(0);
+
+  // Poll background scan job status
+  useEffect(() => {
+    checkActiveSyncStatus();
+    const interval = setInterval(() => {
+      checkActiveSyncStatus();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [checkActiveSyncStatus]);
 
   // Trigger micro-haptics when new loyalty programs are discovered in real time
   useEffect(() => {
@@ -322,6 +341,69 @@ export default function EmailSyncScreen() {
           </View>
         )}
 
+        {/* Background Deep Backfill Progress Banner */}
+        {isBackfillRunning && !isSyncing && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/sync-rejected");
+            }}
+            className="bg-white rounded-3xl p-4 mb-5 border border-sky-200 shadow-sm"
+          >
+            <View className="flex-row items-center justify-between mb-2">
+              <View className="flex-row items-center flex-1 mr-2">
+                <ActivityIndicator size="small" color="#00A3FF" className="mr-2.5" />
+                <View className="flex-1">
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-xs text-slate-900"
+                  >
+                    Deep Mailbox Scan in Background
+                  </Text>
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                    className="text-[11px] text-slate-500 mt-0.5"
+                  >
+                    {activeJobDetails?.messages_processed !== null && activeJobDetails?.messages_processed !== undefined
+                      ? `Evaluated ${activeJobDetails.messages_processed} of ${activeJobDetails.total_messages_found || "..."} statements`
+                      : "AI is analyzing historical statements..."}
+                  </Text>
+                </View>
+              </View>
+              <View className="bg-sky-50 border border-sky-200 px-2.5 py-1 rounded-full">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-[10px] text-[#00A3FF]"
+                >
+                  LIVE SCAN
+                </Text>
+              </View>
+            </View>
+
+            {activeJobDetails?.total_messages_found && activeJobDetails.total_messages_found > 0 ? (
+              <View className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-1">
+                <View
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.max(
+                        8,
+                        Math.round(
+                          ((activeJobDetails.messages_processed || 0) /
+                            activeJobDetails.total_messages_found) *
+                            100
+                        )
+                      )
+                    )}%`,
+                  }}
+                  className="bg-[#00A3FF] h-full rounded-full"
+                />
+              </View>
+            ) : null}
+          </TouchableOpacity>
+        )}
+
         {/* Connected Mailboxes — a user may link several (personal + work). */}
         <Text
           style={{ fontFamily: "PlusJakartaSans-Bold" }}
@@ -434,7 +516,7 @@ export default function EmailSyncScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Skipped & Rejected Emails Inspector */}
+        {/* Skipped & Rejected Emails & Parsed Inspector */}
         <TouchableOpacity
           activeOpacity={0.8}
           onPress={() => {
@@ -444,8 +526,8 @@ export default function EmailSyncScreen() {
           className="bg-white rounded-2xl p-4 mb-4 border border-border-light flex-row items-center justify-between shadow-sm"
         >
           <View className="flex-row items-center flex-1 mr-2">
-            <View className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 items-center justify-center mr-3">
-              <MailX size={18} color="#D97706" />
+            <View className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-100 items-center justify-center mr-3">
+              <Sparkles size={18} color="#00A3FF" />
             </View>
             <View className="flex-1">
               <View className="flex-row items-center">
@@ -453,7 +535,7 @@ export default function EmailSyncScreen() {
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
                   className="text-xs text-dark"
                 >
-                  Skipped & Unparsed Emails
+                  Email Diagnostics & Statements
                 </Text>
                 {(lastSyncRejectedEmails.length > 0 || (syncProgress.rejectedEmails?.length ?? 0) > 0) && (
                   <View className="ml-2 px-1.5 py-0.5 bg-amber-100 rounded-full">
@@ -470,7 +552,7 @@ export default function EmailSyncScreen() {
                 style={{ fontFamily: "PlusJakartaSans-Regular" }}
                 className="text-[11px] text-dark-muted mt-0.5"
               >
-                Inspect emails evaluated as non-loyalty by AI
+                Inspect parsed loyalty statements & skipped emails
               </Text>
             </View>
           </View>

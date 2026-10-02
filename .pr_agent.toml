@@ -1,0 +1,71 @@
+# Qodo v2 — repository configuration for pointzplus-mobile
+# Docs: https://docs.qodo.ai/configuration (portal recommended) +
+#      https://docs.qodo.ai/install-and-configure/configuration-overview/configuration-file
+#      https://docs.qodo.ai/install-and-configure/configuration-overview/configuration-and-command-reference
+#
+# Precedence (high → low): Wiki (.pr_agent.toml) > Repo root (.pr_agent.toml, this file)
+#   > pr-agent-settings repo > Qodo portal. This file applies to PRs created AFTER merge to default branch.
+# Repo: https://github.com/md-aqil/pointzplus | Branch: main | Stack: Expo SDK 57 + Expo Router + NativeWind v4 + Zustand
+
+# ── GitHub App ──
+# Install via Qodo portal (NOT Marketplace): app.qodo.ai → + next to Git providers → GitHub
+# → Connect your organization → Install → select md-aqil/pointzplus.
+[github_app]
+pr_commands = [
+  "/agentic_describe",
+  "/agentic_review",
+]
+# Re-review on every push (mirrors portal Workflow tab → Per-commit trigger).
+handle_push_trigger = true
+ignore_bot_pr = true
+
+# ── How feedback appears + team standards ──
+[review_agent]
+# both = summary comment + inline findings (default). Keeps context in conversation + on lines.
+comments_location_policy = "both"
+# Only High-severity inline; Medium/Low stay in summary to reduce noise.
+inline_comments_severity_threshold = 3
+# One-click Apply Suggestion on eligible inline findings.
+enable_commitable_suggestions = true
+issues_user_guidelines = """PointzPlus (Expo SDK 57, Expo Router, NativeWind v4, Zustand + TanStack Query, Express + PostgreSQL in server/):
+1. Single source of truth — flag duplicates: category meta must reuse constants/popularPrograms.ts CATEGORY_LABELS/POPULAR_PROGRAMS (never screen-local switches/palettes/getCategoryMeta clones); SyncJob type lives in types/models.ts only; password UI must reuse components/ui/PasswordChecklist.tsx; colors via constants/colors.ts + tailwind tokens (no raw hex); API via lib/apiClient.ts (no raw fetch/axios, no hardcoded URLs); push logic via services/pushNotifications.ts.
+2. Zustand perf — flag useAuthStore()/usePointsStore() with NO selector; require per-field selectors + useMemo for getDashboardSummary()/getCategorySummaries()/getExpiringAccounts(); no second global store for auth/points data; no set() progress polling when nothing changed.
+3. Rendering perf — require React.memo on list rows + useCallback handlers + stable key={id}; debounce search >=300ms; FlatList/FlashList for >~20 rows (never .map unbounded in ScrollView); hoist toLocaleString/new Date/regex out of render.
+4. No N+1 — flag Promise.all(list.map(each => fetch)) and await-in-per-row loops (esp. Gmail scan); require batch endpoints (acknowledge-all) and batch writes (INSERT ... ON CONFLICT, UPDATE ... FROM, p-limit 3-5 for AI).
+5. Hygiene — flag mock/fake data in shipped code (hardcoded points/balances/demo user-1), console.* in prod paths (gate behind DEBUG_*), committed secrets/marker PNGs/dist output, `any` creep (require typed apiClient/store fields), setTimeout waits (await real promise), `npx tsc --noEmit` must stay clean."""
+compliance_user_guidelines = """Enforce CODE_GUARDRAILS.md checklist on every PR: (a) searched for existing helper first, (b) selectors per-field + memoized derivations, (c) no raw hex / no screen-local category switches, (d) debounced search + guarded mount fetches + no N+1, (e) server: no await-in-loop + pagination on lists, (f) no console.* in prod, no mock data, no unused dep (grep expo-foo in app components hooks lib store services constants types), (g) layer discipline route→controller→service→repo with shared ApiError envelope + cursor pagination."""
+
+# ── PR summary ──
+[qodo_describe_agent]
+# comment = standalone comment, never rewrites author PR description.
+publish_mode = "comment"
+publish_review_time_estimate_labels = true
+
+# ── Ignore rules (reduce noise) ──
+[config]
+# Skip dependency-only / release-chore PRs.
+ignore_pr_title = ["^ chore\\(deps", "^ chore\\(release", "^\\[skip review\\]", "^WIP"]
+ignore_pr_source_branches = ["^renovate/", "^dependabot/"]
+ignore_pr_labels = ["skip-review", "wip"]
+# Generated / build output excluded from analysis.
+ignore_language_framework = ["generated"]
+# NOTE: for file/folder excludes prefer portal → Repositories → Context tab,
+# e.g. exclude: ios/, android/, dist/, web-build/, .expo/, web/ (pending deletion per guardrails).
+
+# ── CI feedback ──
+[checks]
+enable_auto_checks_feedback = true
+persistent_comment = true
+final_update_message = true
+enable_help_text = false
+
+# ── Remediation (fix agent OFF by default — turn on explicitly when ready) ──
+[chat_agent]
+enable_fixer_agent = false
+
+[fixer_agent]
+enable = false
+enable_auto_fix = false
+action_level_threshold = 3
+open_new_pr = true
+close_fix_pr = true

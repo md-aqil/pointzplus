@@ -15,6 +15,11 @@ export function usePoints() {
   const emailAccounts = usePointsStore((state) => state.emailAccounts);
   const isSyncing = usePointsStore((state) => state.isSyncing);
   const syncProgress = usePointsStore((state) => state.syncProgress);
+  const isBackfillRunning = usePointsStore((state) => state.isBackfillRunning);
+  const activeJobDetails = usePointsStore((state) => state.activeJobDetails);
+  const parsedStatements = usePointsStore((state) => state.parsedStatements);
+  const fetchParsedStatements = usePointsStore((state) => state.fetchParsedStatements);
+  const checkActiveSyncStatus = usePointsStore((state) => state.checkActiveSyncStatus);
   const addManualAccount = usePointsStore((state) => state.addManualAccount);
   const syncEmail = usePointsStore((state) => state.syncEmail);
   const deleteAccount = usePointsStore((state) => state.deleteAccount);
@@ -56,6 +61,11 @@ export function usePoints() {
     expiringAccounts,
 
     isSyncing,
+    isBackfillRunning,
+    activeJobDetails,
+    parsedStatements,
+    fetchParsedStatements,
+    checkActiveSyncStatus,
     syncProgress,
 
     addManualAccount,

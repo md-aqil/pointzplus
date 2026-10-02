@@ -16,6 +16,8 @@ router.get('/google/url', authenticate, emailSyncController.getAuthUrl);
 router.get('/google/callback', emailSyncController.oauthCallback);
 router.post('/scan', authenticate, validate(scanSchema), emailSyncController.scan);
 router.get('/jobs/:id', authenticate, emailSyncController.getJob);
+router.get('/active-job', authenticate, emailSyncController.getActiveJob);
+router.get('/statements', authenticate, emailSyncController.listStatements);
 router.get('/accounts', authenticate, emailSyncController.listAccounts);
 router.delete('/accounts/:provider', authenticate, emailSyncController.disconnect);
 router.post('/google/watch', authenticate, emailSyncController.enableWatch);

@@ -106,3 +106,21 @@ export interface BackendCategoryBreakdown {
   total_points: number;
   expiring_points: number;
 }
+
+export interface ParsedEmailStatement {
+  id: string;
+  from_email: string;
+  subject: string;
+  received_at: string;
+  extracted_balance: number;
+  extracted_account_number: string | null;
+  extracted_expiry_date: string | null;
+  parser_confidence: number;
+  raw_text_preview: string | null;
+  extraction_source: "ai_extractor" | "rule_parser" | string;
+  created_at: string;
+  program_name?: string;
+  category?: string;
+  logo_initial?: string;
+  accent_color?: string;
+}

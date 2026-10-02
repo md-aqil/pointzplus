@@ -32,7 +32,16 @@ import { useAuth } from "../../hooks/useAuth";
 export default function HomeScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const { summary, categories, expiringAccounts, accounts, refreshAll, isSyncing } = usePoints();
+  const {
+    summary,
+    categories,
+    expiringAccounts,
+    accounts,
+    refreshAll,
+    isSyncing,
+    isBackfillRunning,
+    activeJobDetails,
+  } = usePoints();
   const [refreshing, setRefreshing] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -450,6 +459,46 @@ export default function HomeScreen() {
             </>
           ) : (
             <>
+              {/* Background Scan Notification Pill if deep backfill is scanning */}
+              {isBackfillRunning && (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push("/sync-rejected");
+                  }}
+                  className="bg-white border border-sky-200/80 rounded-2xl p-3 mb-3.5 flex-row items-center justify-between shadow-xs"
+                >
+                  <View className="flex-row items-center flex-1 mr-2">
+                    <View className="w-2 h-2 rounded-full bg-[#00A3FF] mr-2" />
+                    <View className="flex-1">
+                      <Text
+                        style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                        className="text-[12px] text-slate-900"
+                      >
+                        Analyzing Inbox in Background
+                      </Text>
+                      <Text
+                        style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                        className="text-[10.5px] text-slate-500"
+                      >
+                        {activeJobDetails?.messages_processed !== null && activeJobDetails?.messages_processed !== undefined
+                          ? `Processed ${activeJobDetails.messages_processed} of ${activeJobDetails.total_messages_found || "..."} statements`
+                          : "AI scanner is evaluating past reward emails"}
+                      </Text>
+                    </View>
+                  </View>
+                  <View className="bg-sky-50 border border-sky-100 px-2 py-0.5 rounded-full">
+                    <Text
+                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                      className="text-[10px] text-[#00A3FF]"
+                    >
+                      Inspect
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+
               {/* Live Discovery Stream (Latest Points Found) */}
               <View className="flex-row items-center justify-between mb-4">
                 <View className="flex-row items-center">

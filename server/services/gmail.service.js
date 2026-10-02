@@ -636,8 +636,8 @@ async function mapConcurrent(items, concurrency, fn) {
         rejectedEmails.push(rejectedObj);
 
         processed += 1;
-        // Stream sanitized rejected diagnostic to sync_jobs (capped at 100 entries)
-        if (jobId && rejectedEmails.length <= 100) {
+        // Stream sanitized rejected diagnostic to sync_jobs
+        if (jobId) {
           await EmailSyncRepo.recordRejectedEmail(jobId, rejectedObj, processed);
         } else if (jobId && processed % PROGRESS_UPDATE_EVERY === 0) {
           await EmailSyncRepo.updateJobProgress(jobId, processed);

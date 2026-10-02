@@ -524,4 +524,30 @@ export const EmailSyncRepo = {
       [userId]
     ).then((r) => r.rows);
   },
+
+  findAnyActiveJob(userId) {
+    return query(
+      `SELECT * FROM sync_jobs
+       WHERE user_id = $1
+         AND status IN ('queued', 'fetching', 'parsing')
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId]
+    ).then((r) => r.rows[0] || null);
+  },
+
+  listEmailStatements(userId, limit = 200) {
+    return query(
+      `SELECT es.id, es.from_email, es.subject, es.received_at, es.extracted_balance,
+              es.extracted_account_number, es.extracted_expiry_date, es.parser_confidence,
+              es.raw_text_preview, es.extraction_source, es.created_at,
+              lp.name as program_name, lp.category, lp.logo_initial, lp.accent_color
+       FROM email_statements es
+       LEFT JOIN loyalty_programs lp ON es.matched_program_id = lp.id
+       WHERE es.user_id = $1
+       ORDER BY es.received_at DESC NULLS LAST
+       LIMIT $2`,
+      [userId, limit]
+    ).then((r) => r.rows);
+  },
 };
