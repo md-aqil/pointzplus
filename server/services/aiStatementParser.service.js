@@ -9,11 +9,11 @@ import crypto from 'crypto';
 import zlib from 'zlib';
 import { StatementParser } from './statementParser.js';
 
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
-const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const getDeepSeekApiKey = () => (process.env.DEEPSEEK_API_KEY || '').trim();
+const getDeepSeekBaseUrl = () => process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com';
+const getDeepSeekModel = () => process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+const getGeminiApiKey = () => (process.env.GEMINI_API_KEY || '').trim();
+const getOpenAiApiKey = () => (process.env.OPENAI_API_KEY || '').trim();
 
 const CATEGORY_COLORS = {
   airlines: '#01A2FB',
@@ -160,7 +160,7 @@ export class AIStatementParser {
     }
 
     // 3. If AI credentials are present, attempt AI structured extraction (including PDFs)
-    if (GEMINI_API_KEY || DEEPSEEK_API_KEY || OPENAI_API_KEY) {
+    if (getGeminiApiKey() || getDeepSeekApiKey() || getOpenAiApiKey()) {
       try {
         const aiResult = await this.extractWithAI({
           fromHeader,
@@ -382,15 +382,19 @@ Respond ONLY with valid JSON conforming to this schema:
   "confidence_score": number (0.0 to 1.0)
 }`;
 
+    const geminiKey = getGeminiApiKey();
+    const deepSeekKey = getDeepSeekApiKey();
+    const openAiKey = getOpenAiApiKey();
+
     // Routing Logic:
     // 1. If images or unread binary PDFs are attached AND GEMINI_API_KEY is present -> use Gemini 2.0 Flash Vision
     // 2. For all Text, HTML, and extracted PDF Statements -> use DeepSeek-V3 (deepseek-chat)
     // 3. Fallback to Gemini 2.0 Flash if DeepSeek is not configured
-    if ((hasImages || hasUnreadPdfs) && GEMINI_API_KEY) {
+    if ((hasImages || hasUnreadPdfs) && geminiKey) {
       return this.callGemini(prompt, hasImages ? imageAttachments : rawPdfAttachments);
-    } else if (DEEPSEEK_API_KEY && cleanBody) {
+    } else if (deepSeekKey && cleanBody) {
       return this.callDeepSeek(prompt);
-    } else if (GEMINI_API_KEY) {
+    } else if (geminiKey) {
       return this.callGemini(prompt, allAttachments);
     } else if (hasUnreadPdfs) {
       // PDF was attached but could not be decompressed/read and no vision multimodal fallback was configured
@@ -398,15 +402,17 @@ Respond ONLY with valid JSON conforming to this schema:
         is_loyalty_statement: false,
         reason: 'PDF_UNREADABLE',
       };
-    } else if (OPENAI_API_KEY) {
+    } else if (openAiKey) {
       return this.callOpenAI(prompt);
     }
     return null;
   }
 
   static async callGemini(prompt, attachments = []) {
+    const key = getGeminiApiKey();
+    if (!key) return null;
     const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
 
     const parts = [];
 
@@ -446,12 +452,14 @@ Respond ONLY with valid JSON conforming to this schema:
   }
 
   static async callOpenAI(prompt) {
+    const key = getOpenAiApiKey();
+    if (!key) return null;
     const url = 'https://api.openai.com/v1/chat/completions';
     const response = await callProvider('OpenAI', url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
@@ -468,15 +476,17 @@ Respond ONLY with valid JSON conforming to this schema:
   }
 
   static async callDeepSeek(prompt) {
-    const url = `${DEEPSEEK_BASE_URL.replace(/\/+$/, '')}/chat/completions`;
+    const key = getDeepSeekApiKey();
+    if (!key) return null;
+    const url = `${getDeepSeekBaseUrl().replace(/\/+$/, '')}/chat/completions`;
     const response = await callProvider('DeepSeek', url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+        Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: DEEPSEEK_MODEL,
+        model: getDeepSeekModel(),
         messages: [
           {
             role: 'system',

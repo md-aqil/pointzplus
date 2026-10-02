@@ -1,4 +1,5 @@
 // server/index.js – PointzPlus API server (wiring only: middleware + routers).
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
