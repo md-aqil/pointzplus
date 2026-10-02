@@ -431,6 +431,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
   const searchQuery = buildLoyaltySearchQuery(domains);
 
   let messages = [];
+  let hasMore = false;
   try {
     if (historyId && account.history_id) {
       const hist = await gmail.users.history.list({
@@ -467,7 +468,10 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
         }
 
         pageToken = listRes.data?.nextPageToken;
-        if (!pageToken || messages.length >= cap) break;
+        if (!pageToken || messages.length >= cap) {
+          if (pageToken && messages.length >= cap) hasMore = true;
+          break;
+        }
       } while (pageToken);
 
       // Sort oldest-to-newest so the latest statement is parsed last and reflects the true current balance.
@@ -495,7 +499,10 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
           }
         }
         fallbackToken = fallbackRes.data?.nextPageToken;
-        if (!fallbackToken || messages.length >= cap) break;
+        if (!fallbackToken || messages.length >= cap) {
+          if (fallbackToken && messages.length >= cap) hasMore = true;
+          break;
+        }
       } while (fallbackToken);
       messages.reverse();
     } catch (fbErr) {
@@ -661,6 +668,7 @@ async function mapConcurrent(items, concurrency, fn) {
     programsUpdated,
     accounts: detectedAccounts,
     rejectedEmails,
+    hasMore,
   };
 }
 
@@ -670,27 +678,43 @@ async function mapConcurrent(items, concurrency, fn) {
  * queued, so the job survives an API restart between queueing and execution.
  */
 export async function processSyncJob(job) {
-  // Prefer the mailbox this job was queued for; fall back to the first connected
-  // account so jobs created before the column existed still run.
+  const isBackfill = job.provider === 'gmail_backfill';
+  const providerKey = isBackfill ? 'gmail' : job.provider;
+
+  // Prefer the mailbox this job was queued for; fall back to the first connected account
   const account = job.email_sync_account_id
     ? await EmailSyncRepo.findById(job.user_id, job.email_sync_account_id)
-    : await EmailSyncRepo.findConnected(job.user_id, job.provider);
+    : await EmailSyncRepo.findConnected(job.user_id, providerKey);
 
   if (!account || account.status !== 'connected') {
     await EmailSyncRepo.markJobFailed(
       job.id,
-      `No connected ${job.provider} account found. Reconnect it in the app.`
+      `No connected ${providerKey} account found. Reconnect it in the app.`
     );
     throw new Error('no connected sync account');
   }
 
+  const tier1Cap = Number.parseInt(process.env.SYNC_TIER1_MAX_RESULTS || '100', 10) || 100;
+  const maxResults = isBackfill ? 10000 : tier1Cap;
+
   try {
-    const result = await scanGmailMessages(account, { jobId: job.id });
+    const result = await scanGmailMessages(account, { jobId: job.id, maxResults });
     await EmailSyncRepo.markJobCompleted(job.id, {
       scanned: result.scanned,
       processed: result.processed,
       programsUpdated: result.programsAdded + result.programsUpdated,
     });
+
+    // Option 2 (2-Tier Progressive Sync):
+    // If Tier 1 completed and there are remaining historical statements, queue Tier 2 (Deep Background Backfill)
+    if (!isBackfill && result.hasMore) {
+      const activeBackfill = await EmailSyncRepo.findActiveJob(job.user_id, account.id);
+      if (!activeBackfill) {
+        await EmailSyncRepo.createJob(job.user_id, 'gmail_backfill', account.id);
+        notifyJobQueued();
+      }
+    }
+
     return result;
   } catch (err) {
     let friendlyError = err.message || 'Gmail sync failed';
