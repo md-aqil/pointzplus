@@ -286,8 +286,10 @@ class ApiClient {
     return this.request<{ activeJob: SyncJob | null; isSyncing: boolean }>('/email-sync/active-job');
   }
 
-  async getEmailStatements(limit = 200) {
-    return this.request<ParsedEmailStatement[]>(`/email-sync/statements?limit=${limit}`);
+  async getEmailStatements(limit = 200, includePreview = true) {
+    return this.request<ParsedEmailStatement[]>(
+      `/email-sync/statements?limit=${limit}&include_preview=${includePreview}`
+    );
   }
 
   async enableGmailWatch() {

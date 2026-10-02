@@ -4,6 +4,7 @@ import {
   pubsubTopicConfigured,
   verifyOAuthState,
   isAuthorizedPubSubRequest,
+  redactSensitiveText,
 } from '../services/gmail.service.js';
 import { EmailSyncRepo } from '../repositories/emailSync.repo.js';
 import { asyncHandler, ApiError } from '../lib/errors.js';
@@ -170,8 +171,29 @@ export const emailSyncController = {
 
   listStatements: asyncHandler(async (req, res) => {
     const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
+    const includePreview = req.query.include_preview === 'true';
     const statements = await EmailSyncRepo.listEmailStatements(req.userId, limit);
-    res.json(statements);
+
+    // Safeguard response: redact any PII / account numbers and omit or sanitize raw_text_preview
+    const sanitized = statements.map((s) => ({
+      id: s.id,
+      from_email: redactSensitiveText(s.from_email || '').slice(0, 100),
+      subject: redactSensitiveText(s.subject || '(No Subject)').slice(0, 150),
+      received_at: s.received_at,
+      extracted_balance: Number(s.extracted_balance) || 0,
+      extracted_account_number: s.extracted_account_number,
+      extracted_expiry_date: s.extracted_expiry_date,
+      parser_confidence: s.parser_confidence,
+      raw_text_preview: includePreview && s.raw_text_preview ? redactSensitiveText(s.raw_text_preview).slice(0, 120) : null,
+      extraction_source: s.extraction_source,
+      created_at: s.created_at,
+      program_name: s.program_name,
+      category: s.category,
+      logo_initial: s.logo_initial,
+      accent_color: s.accent_color,
+    }));
+
+    res.json(sanitized);
   }),
 
   getActiveJob: asyncHandler(async (req, res) => {

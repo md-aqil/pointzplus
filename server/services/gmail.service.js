@@ -17,6 +17,8 @@ const GOOGLE_PUBSUB_TOPIC = process.env.GOOGLE_PUBSUB_TOPIC;
 
 // How often a running scan reports per-message progress to sync_jobs.
 const PROGRESS_UPDATE_EVERY = 5;
+// Maximum rejected diagnostic entries streamed into a single sync_jobs row to prevent DB JSON bloat
+const MAX_STREAMED_REJECTED = 200;
 
 export function createOAuthClient() {
   return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
@@ -339,10 +341,13 @@ async function persistLoyaltyResult(userId, parsed, fromHeader, subjectHeader, r
     updated = true;
   }
 
+  const sanitizedPreview = preview ? redactSensitiveText(preview).slice(0, 150) : null;
+  const sanitizedSubject = redactSensitiveText(subjectHeader || '(No Subject)').slice(0, 150);
+
   await EmailSyncRepo.insertEmailStatement([
-    userId, syncAccountId, fromHeader, subjectHeader, receivedAt || new Date(),
+    userId, syncAccountId, fromHeader, sanitizedSubject, receivedAt || new Date(),
     program.id, detected.balance, detected.accountNumber, detected.expiryDate,
-    detected.confidence || 0.95, preview || null,
+    detected.confidence || 0.95, sanitizedPreview,
     // Which engine produced this value, so a balance can be audited or re-run.
     parsed.source === 'ai_extractor' ? 'ai_extractor' : 'rule_parser',
   ]);
@@ -636,8 +641,8 @@ async function mapConcurrent(items, concurrency, fn) {
         rejectedEmails.push(rejectedObj);
 
         processed += 1;
-        // Stream sanitized rejected diagnostic to sync_jobs
-        if (jobId) {
+        // Stream sanitized rejected diagnostic to sync_jobs (capped to avoid JSON bloat)
+        if (jobId && rejectedEmails.length <= MAX_STREAMED_REJECTED) {
           await EmailSyncRepo.recordRejectedEmail(jobId, rejectedObj, processed);
         } else if (jobId && processed % PROGRESS_UPDATE_EVERY === 0) {
           await EmailSyncRepo.updateJobProgress(jobId, processed);
