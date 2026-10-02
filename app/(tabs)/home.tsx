@@ -494,39 +494,37 @@ export default function HomeScreen() {
                     <TouchableOpacity
                       key={acc.id}
                       onPress={() => router.push(`/category/${acc.program.category}`)}
-                      activeOpacity={0.85}
-                      className="bg-white rounded-2xl p-4 mb-3 border border-slate-200/60 shadow-sm flex-row items-center justify-between"
+                      activeOpacity={0.8}
+                      className="bg-white rounded-[22px] px-4 py-3 mb-2.5 border border-slate-100 flex-row items-center justify-between"
                     >
                       <View className="flex-row items-center flex-1 mr-2">
                         <View
-                          style={{ backgroundColor: `${acc.program.accentColor}18` }}
-                          className="w-11 h-11 rounded-xl items-center justify-center mr-3 border border-slate-100"
+                          style={{ backgroundColor: `${acc.program.accentColor}12` }}
+                          className="w-11 h-11 rounded-full items-center justify-center mr-3 border border-slate-100"
                         >
-                          <Text className="text-lg">{acc.program.logoInitial}</Text>
+                          <Text className="text-lg">{acc.program.logoInitial || "🛍️"}</Text>
                         </View>
                         <View className="flex-1">
                           <Text
                             style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                            className="text-[15px] text-slate-900"
+                            className="text-[14.5px] text-slate-900"
+                            numberOfLines={1}
                           >
                             {acc.program.name}
                           </Text>
                           <Text
                             style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                            className="text-[12px] text-slate-500 mt-0.5"
+                            className="text-[11.5px] text-slate-400 mt-0.5"
                           >
-                            {acc.accountNumberMasked && acc.accountNumberMasked !== "MEMBER-***"
-                              ? `${acc.accountNumberMasked} • `
-                              : ""}
-                            Discovered from Gmail
+                            {acc.accountNumberMasked || "MEMBER-***"} · Discovered
                           </Text>
                         </View>
                       </View>
 
-                      <View className="bg-[#EAFBF3] border border-emerald-100 px-3 py-1.5 rounded-xl items-center justify-center">
+                      <View className="bg-[#E8FAF3] border border-[#D1F7E5] px-3.5 py-1.5 rounded-full items-center justify-center">
                         <Text
                           style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                          className="text-[15px] text-emerald-600"
+                          className="text-[13.5px] text-[#00A86B]"
                         >
                           +{acc.currentBalance.toLocaleString()}
                         </Text>

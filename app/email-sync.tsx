@@ -277,11 +277,11 @@ export default function EmailSyncScreen() {
                 {syncProgress.liveDetections.slice(-5).reverse().map((item, idx) => (
                   <View
                     key={`${item.programName}-${idx}`}
-                    className="bg-slate-50 border border-slate-200/70 rounded-2xl p-3 flex-row items-center justify-between mb-2"
+                    className="bg-white border border-slate-100 rounded-[22px] px-4 py-3 flex-row items-center justify-between mb-2.5"
                   >
                     <View className="flex-row items-center flex-1 mr-2">
-                      <View className="w-8 h-8 rounded-xl bg-sky-100 items-center justify-center mr-2.5">
-                        <Text className="text-sm">
+                      <View className="w-11 h-11 rounded-full bg-slate-50 items-center justify-center mr-3 border border-slate-100">
+                        <Text className="text-lg">
                           {item.category === "airlines"
                             ? "✈️"
                             : item.category === "banking"
@@ -294,23 +294,23 @@ export default function EmailSyncScreen() {
                       <View className="flex-1">
                         <Text
                           style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                          className="text-xs text-slate-900"
+                          className="text-[14.5px] text-slate-900"
                           numberOfLines={1}
                         >
                           {item.programName}
                         </Text>
                         <Text
                           style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                          className="text-[10px] text-slate-400"
+                          className="text-[11.5px] text-slate-400 mt-0.5"
                         >
-                          {item.accountNumber ? `${item.accountNumber} · ` : ""}Discovered
+                          {item.accountNumber || "MEMBER-***"} · Discovered
                         </Text>
                       </View>
                     </View>
-                    <View className="bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200/70">
+                    <View className="bg-[#E8FAF3] border border-[#D1F7E5] px-3.5 py-1.5 rounded-full items-center justify-center">
                       <Text
                         style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                        className="text-xs text-emerald-700"
+                        className="text-[13.5px] text-[#00A86B]"
                       >
                         +{Number(item.balance).toLocaleString()}
                       </Text>
