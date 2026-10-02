@@ -93,7 +93,7 @@ export default function OverviewScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 110 }}
-        className="px-5 pt-2"
+        className="px-4 pt-2"
         refreshControl={
           <RefreshControl
             refreshing={refreshing || isSyncing}
@@ -112,7 +112,7 @@ export default function OverviewScreen() {
         </Text>
 
         {/* Top Summary Card (Total number & Redeem this month) */}
-        <View className="w-full bg-[#F0FAFE] border border-[#DCF0FA] rounded-2xl p-5 flex-row justify-between mb-5 shadow-sm">
+        <View className="w-full bg-[#F0FAFE] border border-[#DCF0FA] rounded-2xl px-4 py-4 flex-row justify-between mb-4 shadow-sm">
           <View>
             <Text
               style={{ fontFamily: "PlusJakartaSans-Bold" }}
@@ -145,7 +145,7 @@ export default function OverviewScreen() {
         </View>
 
         {/* Breakdown Card */}
-        <View className="w-full bg-[#F4FBFE] border border-[#E0F3FB] rounded-3xl p-5 mb-6 shadow-sm">
+        <View className="w-full bg-[#F4FBFE] border border-[#E0F3FB] rounded-2xl px-4 py-4 mb-5 shadow-sm">
           <View className="flex-row items-center justify-between mb-2">
             <Text
               style={{ fontFamily: "PlusJakartaSans-Bold" }}
@@ -157,11 +157,11 @@ export default function OverviewScreen() {
           </View>
 
           {/* SVG Donut Chart with Floating Badges & Center Count */}
-          <View className="items-center justify-center my-3">
+          <View className="items-center justify-center my-2">
             <PointsDonutChart
               segments={segments}
               totalPoints={totalDisplay}
-              size={270}
+              size={260}
             />
           </View>
 
