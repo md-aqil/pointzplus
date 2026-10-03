@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 561.750004 686.75265">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: none;
+      }
+
+      .cls-2 {
+        fill: url(#linear-gradient);
+      }
+
+      .cls-3 {
+        fill: #01a2fb;
+      }
+
+      .cls-4 {
+        clip-path: url(#clippath);
+      }
+    </style>
+    <clipPath id="clippath">
+      <polygon class="cls-1" points="449.478152 112.271852 449.478152 0 389.132127 0 389.132127 112.271852 275.728115 112.271852 275.728115 172.621714 389.132127 172.621714 389.132127 286.021888 449.478152 286.021888 449.478152 172.621714 561.750004 172.621714 561.750004 112.271852 449.478152 112.271852"/>
+    </clipPath>
+    <linearGradient id="linear-gradient" x1="275.728115" y1="286.021888" x2="561.750004" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3f0059"/>
+      <stop offset="1" stop-color="#01a2fb"/>
+    </linearGradient>
+  </defs>
+  <path class="cls-3" d="M0,236.341191h163.840762c90.687901,0,153.563055,52.597448,153.563055,140.867517,0,87.057315-62.875154,140.26114-153.563055,140.26114h-92.499357v169.282803H0V236.341191ZM165.652217,453.988316c48.36816,0,81.016572-30.226742,81.016572-77.385986,0-47.155406-32.648412-76.779609-81.016572-76.779609h-94.310812v154.165594h94.310812Z"/>
+  <g class="cls-4">
+    <rect class="cls-2" x="275.728115" width="286.021888" height="286.021888"/>
+  </g>
+</svg>

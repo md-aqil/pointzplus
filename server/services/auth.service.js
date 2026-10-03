@@ -9,9 +9,13 @@ import { query } from '../db.js';
 const TOKEN_TTL = '30d';
 
 function signToken(user) {
-  return jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
-    expiresIn: TOKEN_TTL,
-  });
+  return jwt.sign(
+    { userId: user.id, email: user.email, tv: user.token_version ?? 1 },
+    JWT_SECRET,
+    {
+      expiresIn: TOKEN_TTL,
+    }
+  );
 }
 
 function toPublicUser(user) {
@@ -76,5 +80,15 @@ export const authService = {
     const removed = await UsersRepo.remove(userId);
     if (!removed) throw ApiError.notFound('User not found');
     return { message: 'Account deleted successfully' };
+  },
+
+  // Invalidates every outstanding JWT for this user by bumping token_version.
+  // Fail-fast: unknown user -> 404 (defensive rule #1: never 200-with-false).
+  async logoutAll(userId) {
+    const newVersion = await UsersRepo.bumpTokenVersion(userId);
+    if (newVersion === null) {
+      throw ApiError.notFound('User not found');
+    }
+    return { message: 'All sessions revoked' };
   },
 };

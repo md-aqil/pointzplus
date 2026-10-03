@@ -57,56 +57,59 @@ export default function OnboardingScreen() {
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        {/* Top Logo */}
-        <View style={styles.logoContainer}>
-          <PointzPlusLogo width={150} height={100} />
-        </View>
+        {/* Top Section Group */}
+        <View style={styles.topSection}>
+          {/* Top Logo */}
+          <View style={styles.logoContainer}>
+            <PointzPlusLogo width={130} height={80} />
+          </View>
 
-        {/* Heading & Subtitle */}
-        <View style={styles.headingContainer}>
-          <Text style={styles.title}>Welcome to PointzPlus!</Text>
-          <Text style={styles.subtitle}>Discover a world of Rewards</Text>
-        </View>
+          {/* Heading & Subtitle */}
+          <View style={styles.headingContainer}>
+            <Text style={styles.title}>Welcome to PointzPlus!</Text>
+            <Text style={styles.subtitle}>Discover a world of Rewards</Text>
+          </View>
 
-        {/* 3D Rewards Hero Illustration */}
-        <View style={styles.heroImageContainer}>
-          <Image
-            source={require("../assets/onboarding-hero.png")}
-            style={styles.heroImage}
-            resizeMode="contain"
-          />
-        </View>
+          {/* 3D Rewards Hero Illustration */}
+          <View style={styles.heroImageContainer}>
+            <Image
+              source={require("../assets/onboarding-hero.png")}
+              style={styles.heroImage}
+              resizeMode="contain"
+            />
+          </View>
 
-        {/* Features Floating Card */}
-        <View style={styles.featuresCard}>
-          {features.map((item, index) => (
-            <View
-              key={item.id}
-              style={[
-                styles.featureRow,
-                index !== features.length - 1 && styles.featureRowDivider,
-              ]}
-            >
-              {/* Icon Badge */}
-              <View style={styles.iconBadge}>{item.icon}</View>
+          {/* Features Floating Card */}
+          <View style={styles.featuresCard}>
+            {features.map((item, index) => (
+              <View
+                key={item.id}
+                style={[
+                  styles.featureRow,
+                  index !== features.length - 1 && styles.featureRowDivider,
+                ]}
+              >
+                {/* Icon Badge */}
+                <View style={styles.iconBadge}>{item.icon}</View>
 
-              {/* Text Info */}
-              <View style={styles.featureTextContainer}>
-                <Text style={styles.featureTitle}>{item.title}</Text>
-                <Text style={styles.featureSubtitle}>{item.subtitle}</Text>
+                {/* Text Info */}
+                <View style={styles.featureTextContainer}>
+                  <Text style={styles.featureTitle}>{item.title}</Text>
+                  <Text style={styles.featureSubtitle}>{item.subtitle}</Text>
+                </View>
               </View>
-            </View>
-          ))}
+            ))}
+          </View>
         </View>
 
         {/* Bottom Actions */}
         <View style={styles.actionsContainer}>
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => router.push("/(auth)/register")}
+            onPress={() => router.push("/(auth)/sign-in")}
             activeOpacity={0.88}
           >
-            <Text style={styles.primaryButtonText}>Create an Account</Text>
+            <Text style={styles.primaryButtonText}>Proceed</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -130,18 +133,21 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: Platform.OS === "web" ? 48 : 28,
+    paddingTop: 4,
+    paddingBottom: Platform.OS === "web" ? 36 : 20,
     justifyContent: "space-between",
+  },
+  topSection: {
+    width: "100%",
   },
   logoContainer: {
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 2,
+    marginTop: 0,
   },
   headingContainer: {
     alignItems: "center",
-    marginTop: 6,
+    marginTop: 2,
   },
   title: {
     fontFamily: "PlusJakartaSans-Bold",
@@ -155,16 +161,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#6A6A74",
     textAlign: "center",
-    marginTop: 3,
+    marginTop: 2,
   },
   heroImageContainer: {
     alignItems: "center",
     justifyContent: "center",
-    marginVertical: 4,
+    marginTop: 6,
+    marginBottom: 16,
+    width: "100%",
   },
   heroImage: {
     width: "100%",
-    height: Math.min(170, SCREEN_HEIGHT * 0.22),
+    height: Math.min(225, Math.max(175, SCREEN_HEIGHT * 0.26)),
   },
   featuresCard: {
     backgroundColor: "#FFFFFF",
@@ -178,7 +186,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 14,
     elevation: 2,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   featureRow: {
     flexDirection: "row",
@@ -215,18 +223,19 @@ const styles = StyleSheet.create({
   },
   actionsContainer: {
     width: "100%",
-    gap: 8,
-    paddingBottom: 8,
+    gap: 10,
+    marginTop: 4,
+    paddingBottom: 10,
   },
   primaryButton: {
     backgroundColor: "#01A2FB",
-    height: 50,
-    borderRadius: 14,
+    height: 52,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#01A2FB",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.22,
     shadowRadius: 10,
     elevation: 3,
   },
@@ -236,7 +245,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   secondaryButton: {
-    height: 40,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },

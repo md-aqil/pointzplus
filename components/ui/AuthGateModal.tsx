@@ -178,8 +178,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "rgba(7, 6, 23, 0.65)",
     justifyContent: "flex-end",
+    alignItems: "center",
   },
   modalCard: {
+    width: "100%",
+    maxWidth: 393,
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,

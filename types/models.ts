@@ -22,8 +22,8 @@ export interface NotificationItem {
   pointsDelta?: number;
 }
 
-/** Lifecycle of a server-side Gmail scan job (mirrors sync_job_status in PostgreSQL). */
-export type SyncJobStatus = "queued" | "fetching" | "parsing" | "completed" | "failed";
+/** Lifecycle of a server-side Gmail scan job (mirrors sync_job_status in PostgreSQL + UI transition). */
+export type SyncJobStatus = "queued" | "fetching" | "parsing" | "cancelling" | "completed" | "failed" | "cancelled";
 
 export interface LiveDetection {
   programName: string;

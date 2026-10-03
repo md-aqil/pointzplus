@@ -1,5 +1,6 @@
 // server/middleware/auth.js – Shared JWT authentication
 import jwt from 'jsonwebtoken';
+import { UsersRepo } from '../repositories/users.repo.js';
 
 // Fail fast: never fall back to a hardcoded secret (forged-token risk).
 if (!process.env.JWT_SECRET) {
@@ -19,6 +20,24 @@ export function authenticate(req, res, next) {
   try {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, JWT_SECRET);
+    // Token revocation: reject if the user's current token_version is newer
+    // than the one embedded in the token (post-logout-all / post-password-reset).
+    if (typeof decoded.tv === 'number' && decoded.tv !== null) {
+      UsersRepo.getTokenVersion(decoded.userId)
+        .then((currentVersion) => {
+          if (currentVersion === null) {
+            return res.status(401).json({ error: 'Invalid token' });
+          }
+          if (decoded.tv < currentVersion) {
+            return res.status(401).json({ error: 'Token revoked' });
+          }
+          req.userId = decoded.userId;
+          req.userEmail = decoded.email;
+          next();
+        })
+        .catch(() => res.status(500).json({ error: 'Internal server error' }));
+      return;
+    }
     req.userId = decoded.userId;
     req.userEmail = decoded.email;
     next();

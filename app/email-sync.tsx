@@ -1,5 +1,5 @@
 // app/email-sync.tsx – Google Gmail OAuth Auto-Sync Screen
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -31,6 +31,7 @@ import * as Haptics from "expo-haptics";
 import { usePoints } from "../hooks/usePoints";
 import { usePointsStore } from "../store/pointsStore";
 import { useAuth } from "../hooks/useAuth";
+import { useStopMailboxScan } from "../hooks/useStopMailboxScan";
 import { apiClient } from "../lib/apiClient";
 import { logger } from "../lib/logger";
 import { MailboxCard } from "../components/ui/MailboxCard";
@@ -50,7 +51,9 @@ export default function EmailSyncScreen() {
     isBackfillRunning,
     activeJobDetails,
     checkActiveSyncStatus,
+    cancelSyncJob,
   } = usePoints();
+  const { isStoppingScan, handleStopScan } = useStopMailboxScan();
   const fetchAccountsFromBackend = usePointsStore((s) => s.fetchAccountsFromBackend);
   const lastSyncRejectedEmails = usePointsStore((s) => s.lastSyncRejectedEmails);
   const [syncSuccessModal, setSyncSuccessModal] = useState(false);
@@ -234,9 +237,9 @@ export default function EmailSyncScreen() {
         {/* Live Dopamine Sync & Discovery Stream */}
         {isSyncing && (
           <View className="bg-white rounded-3xl p-5 mb-5 border-2 border-[#00A3FF]/30 shadow-md">
-            {/* Header: Status & Live Percentage */}
+            {/* Header: Status, Stop button & Live Percentage */}
             <View className="flex-row items-center justify-between mb-3">
-              <View className="flex-row items-center">
+              <View className="flex-row items-center flex-1 mr-2">
                 <ActivityIndicator size="small" color="#00A3FF" className="mr-2" />
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
@@ -245,13 +248,28 @@ export default function EmailSyncScreen() {
                   Scanning Statements...
                 </Text>
               </View>
-              <View className="bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200">
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-xs text-[#00A3FF]"
+              <View className="flex-row items-center space-x-1.5 gap-1.5">
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={isStoppingScan}
+                  onPress={handleStopScan}
+                  className="bg-red-50 border border-red-200 px-2.5 py-1 rounded-full"
                 >
-                  {syncProgress.percent}%
-                </Text>
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-xs text-red-500"
+                  >
+                    {isStoppingScan ? "Stopping..." : "Stop"}
+                  </Text>
+                </TouchableOpacity>
+                <View className="bg-sky-50 px-2.5 py-1 rounded-full border border-sky-200">
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-xs text-[#00A3FF]"
+                  >
+                    {syncProgress.percent}%
+                  </Text>
+                </View>
               </View>
             </View>
 
@@ -326,16 +344,16 @@ export default function EmailSyncScreen() {
 
         {/* Background Deep Backfill Progress Banner */}
         {isBackfillRunning && !isSyncing && (
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/sync-rejected");
-            }}
-            className="bg-white rounded-3xl p-4 mb-5 border border-sky-200 shadow-sm"
-          >
+          <View className="bg-white rounded-3xl p-4 mb-5 border border-sky-200 shadow-sm">
             <View className="flex-row items-center justify-between mb-2">
-              <View className="flex-row items-center flex-1 mr-2">
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push("/sync-rejected");
+                }}
+                className="flex-row items-center flex-1 mr-2"
+              >
                 <ActivityIndicator size="small" color="#00A3FF" className="mr-2.5" />
                 <View className="flex-1">
                   <Text
@@ -353,14 +371,36 @@ export default function EmailSyncScreen() {
                       : "AI is analyzing historical statements..."}
                   </Text>
                 </View>
-              </View>
-              <View className="bg-sky-50 border border-sky-200 px-2.5 py-1 rounded-full">
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-[10px] text-[#00A3FF]"
+              </TouchableOpacity>
+              <View className="flex-row items-center space-x-1.5 gap-1.5">
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={isStoppingScan}
+                  onPress={handleStopScan}
+                  className="bg-red-50 border border-red-200 px-2.5 py-1 rounded-full"
                 >
-                  LIVE SCAN
-                </Text>
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-[10px] text-red-500"
+                  >
+                    {isStoppingScan ? "Stopping..." : "Stop"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    router.push("/sync-rejected");
+                  }}
+                  className="bg-sky-50 border border-sky-200 px-2.5 py-1 rounded-full"
+                >
+                  <Text
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-[10px] text-[#00A3FF]"
+                  >
+                    LIVE SCAN
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -384,7 +424,7 @@ export default function EmailSyncScreen() {
                 />
               </View>
             ) : null}
-          </TouchableOpacity>
+          </View>
         )}
 
         {/* Connected Mailboxes — a user may link several (personal + work). */}

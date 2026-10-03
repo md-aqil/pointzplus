@@ -44,31 +44,35 @@ function getReasonBadge(reason: string) {
   switch (reason) {
     case "AI_NON_LOYALTY":
       return {
-        label: "AI: Non-Loyalty Statement",
+        label: "Non-Loyalty Message",
         bg: "bg-amber-50",
         border: "border-amber-200",
         text: "text-amber-800",
+        description: "Security alert, receipt, or newsletter with no reward balances.",
       };
     case "NO_VALID_BALANCE":
       return {
-        label: "AI: No Point Balance Found",
+        label: "No Point Balance",
         bg: "bg-blue-50",
         border: "border-blue-200",
         text: "text-blue-800",
+        description: "Promotional deal or discount without an active points balance.",
       };
     case "NO_REWARD_SIGNALS":
       return {
-        label: "No Reward Keywords",
+        label: "Non-Reward Email",
         bg: "bg-slate-100",
         border: "border-slate-200",
         text: "text-slate-700",
+        description: "General message containing no points, miles, or reward keywords.",
       };
     case "AI_ERROR":
       return {
-        label: "AI Timeout / Error",
+        label: "Evaluation Skipped",
         bg: "bg-rose-50",
         border: "border-rose-200",
         text: "text-rose-800",
+        description: "Temporary timeout during evaluation; skipped safely.",
       };
     default:
       return {
@@ -76,6 +80,7 @@ function getReasonBadge(reason: string) {
         bg: "bg-slate-100",
         border: "border-slate-200",
         text: "text-slate-700",
+        description: "Evaluated and skipped.",
       };
   }
 }
@@ -207,10 +212,17 @@ export default function SyncRejectedScreen() {
         activeJobDetails.status === "fetching" ||
         activeJobDetails.status === "parsing"));
 
+  const totalProcessed = activeJobDetails?.messages_processed ?? (rejectedList.length + parsedStatements.length);
+  const totalFoundInMailbox = activeJobDetails?.total_messages_found ?? 0;
+  const filteredCount =
+    activeJobDetails?.messages_processed != null
+      ? Math.max(0, (activeJobDetails.messages_processed ?? 0) - parsedStatements.length)
+      : rejectedList.length;
+
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">
       <ScreenHeader
-        title="Email Diagnostics"
+        title="Email Scanner & Filter"
         fallbackRoute="/email-sync"
       />
 
@@ -245,9 +257,9 @@ export default function SyncRejectedScreen() {
                       style={{ fontFamily: "PlusJakartaSans-Regular" }}
                       className="text-[11px] text-slate-500 mt-0.5"
                     >
-                      {activeJobDetails?.messages_processed !== null && activeJobDetails?.messages_processed !== undefined
-                        ? `Processed ${activeJobDetails.messages_processed} of ${activeJobDetails.total_messages_found || "..."} statements`
-                        : "DeepSeek AI is scanning statements in the background..."}
+                      {totalFoundInMailbox > 0
+                        ? `Scanned ${totalProcessed.toLocaleString()} of ${totalFoundInMailbox.toLocaleString()} candidate emails`
+                        : "AI is evaluating candidate reward emails in the background..."}
                     </Text>
                   </View>
                 </View>
@@ -261,7 +273,7 @@ export default function SyncRejectedScreen() {
                 </View>
               </View>
 
-              {activeJobDetails?.total_messages_found && activeJobDetails.total_messages_found > 0 ? (
+              {totalFoundInMailbox > 0 ? (
                 <View className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-1">
                   <View
                     style={{
@@ -269,11 +281,7 @@ export default function SyncRejectedScreen() {
                         100,
                         Math.max(
                           8,
-                          Math.round(
-                            ((activeJobDetails.messages_processed || 0) /
-                              activeJobDetails.total_messages_found) *
-                              100
-                          )
+                          Math.round((totalProcessed / totalFoundInMailbox) * 100)
                         )
                       )}%`,
                     }}
@@ -285,8 +293,67 @@ export default function SyncRejectedScreen() {
           </View>
         )}
 
+        {/* 3-Column Overview Breakdown Card */}
+        <View className="px-5 pt-2 pb-1">
+          <View className="bg-white border border-slate-200/80 rounded-2xl p-3.5 shadow-xs">
+            <View className="flex-row items-center justify-between">
+              {/* Stat 1: Total Evaluated */}
+              <View className="flex-1 items-center">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-base text-slate-900"
+                >
+                  {totalProcessed.toLocaleString()}
+                </Text>
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Medium" }}
+                  className="text-[10px] text-slate-400 mt-0.5"
+                >
+                  Emails Evaluated
+                </Text>
+              </View>
+
+              <View className="w-[1px] h-7 bg-slate-100 mx-1" />
+
+              {/* Stat 2: Reward Statements Found */}
+              <View className="flex-1 items-center">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-base text-emerald-600"
+                >
+                  {parsedStatements.length.toLocaleString()}
+                </Text>
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Medium" }}
+                  className="text-[10px] text-slate-400 mt-0.5"
+                >
+                  Points Found
+                </Text>
+              </View>
+
+              <View className="w-[1px] h-7 bg-slate-100 mx-1" />
+
+              {/* Stat 3: Non-reward Filtered Out */}
+              <View className="flex-1 items-center">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-base text-slate-500"
+                >
+                  {filteredCount.toLocaleString()}
+                </Text>
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Medium" }}
+                  className="text-[10px] text-slate-400 mt-0.5"
+                >
+                  Non-Reward
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
         {/* Primary Segmented Tab Switcher */}
-        <View className="px-5 pt-3 pb-2">
+        <View className="px-5 pt-2 pb-2">
           <View className="bg-slate-100/90 p-1 rounded-2xl flex-row">
             <TouchableOpacity
               activeOpacity={0.8}
@@ -307,7 +374,7 @@ export default function SyncRejectedScreen() {
                   activeTab === "SKIPPED" ? "text-slate-900" : "text-slate-500"
                 }`}
               >
-                Skipped / Unparsed
+                Filtered Out
               </Text>
               <View
                 className={`ml-1.5 px-1.5 py-0.2 rounded-full ${
@@ -344,7 +411,7 @@ export default function SyncRejectedScreen() {
                   activeTab === "PARSED" ? "text-slate-900" : "text-slate-500"
                 }`}
               >
-                Parsed & Detected
+                Loyalty Found
               </Text>
               <View
                 className={`ml-1.5 px-1.5 py-0.2 rounded-full ${
@@ -364,10 +431,10 @@ export default function SyncRejectedScreen() {
           </View>
         </View>
 
-        {/* Info Banner */}
+        {/* Info Explainer Banner */}
         <View className="px-5 pt-1 pb-2">
           {activeTab === "SKIPPED" ? (
-            <View className="bg-sky-50 border border-sky-200/80 rounded-2xl p-3.5 flex-row items-start space-x-3">
+            <View className="bg-sky-50/90 border border-sky-200/80 rounded-2xl p-3.5 flex-row items-start space-x-3">
               <View className="w-7 h-7 rounded-full bg-sky-100 items-center justify-center mt-0.5 mr-2.5">
                 <Sparkles size={14} color="#01A2FB" />
               </View>
@@ -376,18 +443,18 @@ export default function SyncRejectedScreen() {
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
                   className="text-xs text-sky-950 mb-0.5"
                 >
-                  AI Skipped Emails Stream
+                  Why were these emails skipped?
                 </Text>
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Regular" }}
                   className="text-[11px] text-sky-900/80 leading-4"
                 >
-                  These messages were evaluated by DeepSeek & Gemini but were not classified as active loyalty balance statements.
+                  Gmail returned these messages for matching search words (like &quot;statement&quot; or &quot;summary&quot;), but our AI verified they do not contain loyalty points. They are safely skipped. Showing latest {rejectedList.length} samples.
                 </Text>
               </View>
             </View>
           ) : (
-            <View className="bg-emerald-50 border border-emerald-200/80 rounded-2xl p-3.5 flex-row items-start space-x-3">
+            <View className="bg-emerald-50/90 border border-emerald-200/80 rounded-2xl p-3.5 flex-row items-start space-x-3">
               <View className="w-7 h-7 rounded-full bg-emerald-100 items-center justify-center mt-0.5 mr-2.5">
                 <CheckCircle2 size={14} color="#059669" />
               </View>
@@ -396,13 +463,13 @@ export default function SyncRejectedScreen() {
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
                   className="text-xs text-emerald-950 mb-0.5"
                 >
-                  Extracted Loyalty Statements
+                  Discovered Points &amp; Miles
                 </Text>
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Regular" }}
                   className="text-[11px] text-emerald-900/80 leading-4"
                 >
-                  Reward statements successfully parsed and credited to your PointzPlus portfolio.
+                  These statements contained confirmed reward balances and have been added to your unified portfolio.
                 </Text>
               </View>
             </View>

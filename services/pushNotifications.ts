@@ -2,7 +2,7 @@
 import * as ExpoNotifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import { storage } from '../lib/storage';
 import { apiClient } from '../lib/apiClient';
 import { logger } from '../lib/logger';
 
@@ -29,7 +29,7 @@ function pruneSentAlerts(entries: Record<string, string>): Record<string, string
 
 async function getSentAlerts(): Promise<Record<string, string>> {
   try {
-    const raw = await SecureStore.getItemAsync(SENT_ALERTS_KEY);
+    const raw = await storage.getItemAsync(SENT_ALERTS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
@@ -46,7 +46,7 @@ async function markAlertSent(key: string): Promise<void> {
     const payload = JSON.stringify(pruneSentAlerts(current));
     // Skip oversized writes rather than letting SecureStore reject them silently.
     if (payload.length > LEDGER_MAX_BYTES) return;
-    await SecureStore.setItemAsync(SENT_ALERTS_KEY, payload);
+    await storage.setItemAsync(SENT_ALERTS_KEY, payload);
   } catch {
     // Non-fatal
   }

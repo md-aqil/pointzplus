@@ -40,6 +40,7 @@ router.get('/verify', authenticate, authController.verify);
 router.get('/profile', authenticate, authController.getProfile);
 router.put('/profile', authenticate, validate(profileSchema), authController.updateProfile);
 router.post('/logout', authController.logout);
+router.post('/logout-all', authenticate, authController.logoutAll);
 router.delete('/account', authenticate, authController.deleteAccount);
 
 export default router;

@@ -42,4 +42,21 @@ export const UsersRepo = {
       (r) => r.rows[0] || null
     );
   },
+
+  getTokenVersion(id) {
+    return query('SELECT token_version FROM users WHERE id = $1', [id]).then(
+      (r) => (r.rows[0] ? r.rows[0].token_version : null)
+    );
+  },
+
+  // Bumps token_version; all previously issued JWTs become invalid.
+  // Returns the new version, or null if the user does not exist (caller -> 404).
+  bumpTokenVersion(id) {
+    return query(
+      `UPDATE users SET token_version = token_version + 1
+       WHERE id = $1
+       RETURNING token_version`,
+      [id]
+    ).then((r) => (r.rows[0] ? r.rows[0].token_version : null));
+  },
 };

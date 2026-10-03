@@ -19,8 +19,8 @@ export const pool = new Pool({
 });
 
 pool.on('error', (err) => {
+  // Log instead of exiting: a single idle-client error must not kill the API.
   console.error('Unexpected error on idle client', err);
-  process.exit(-1);
 });
 
 // Test connection
@@ -43,7 +43,14 @@ export async function query(text, params) {
   try {
     const res = await pool.query(text, params);
     const duration = Date.now() - start;
-    console.log('Executed query', { text: text.substring(0, 50), duration, rows: res.rowCount });
+    // Per-query logging is gated behind DEBUG_SQL to avoid prod log spam (guardrail §4).
+    if (process.env.DEBUG_SQL === '1') {
+      console.log('Executed query', {
+        text: text.substring(0, 50),
+        duration,
+        rows: res.rowCount,
+      });
+    }
     return res;
   } catch (err) {
     console.error('Query error:', err.message);

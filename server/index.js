@@ -48,8 +48,11 @@ app.use(
     credentials: true,
   })
 );
-app.use(morgan('dev'));
-app.use(express.json({ limit: '10mb' }));
+// HTTP request logging: verbose only in development (guardrail §4).
+if (process.env.NODE_ENV !== 'production') {
+  app.use(morgan('dev'));
+}
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Baseline API limiter (auth routes add a stricter credential limiter on top).

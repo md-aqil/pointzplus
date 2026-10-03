@@ -24,6 +24,7 @@ export function usePoints() {
   const syncEmail = usePointsStore((state) => state.syncEmail);
   const deleteAccount = usePointsStore((state) => state.deleteAccount);
   const disconnectEmail = usePointsStore((state) => state.disconnectEmail);
+  const cancelSyncJob = usePointsStore((state) => state.cancelSyncJob);
   const rawRefreshAll = usePointsStore((state) => state.refreshAll);
 
   const refreshAll = useCallback(
@@ -83,6 +84,7 @@ export function usePoints() {
     syncEmail,
     deleteAccount,
     disconnectEmail,
+    cancelSyncJob,
     refreshAll,
     refetch: refreshAll,
 

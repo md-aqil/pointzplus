@@ -52,3 +52,16 @@ button:focus-visible,
 .web-input {
   height: 48px;
 }
+
+/* Responsive Desktop Web Constraint for Portaled Modals */
+@media (min-width: 501px) {
+  [role="dialog"] {
+    align-items: center !important;
+    justify-content: flex-end;
+  }
+  [role="dialog"] > div {
+    max-width: 393px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+}

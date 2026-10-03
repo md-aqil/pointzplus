@@ -228,17 +228,21 @@ export const EmailSyncRepo = {
     return query(
       `UPDATE sync_jobs
        SET status = 'parsing', total_messages_found = $2, locked_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1 AND status = 'fetching'
+       RETURNING *`,
       [jobId, totalMessages]
-    );
+    ).then((r) => r.rows[0] || null);
   },
 
   /** Heartbeat + live per-message progress for the mobile progress bar. */
   updateJobProgress(jobId, processed) {
     return query(
-      `UPDATE sync_jobs SET messages_processed = $2, locked_at = NOW() WHERE id = $1`,
+      `UPDATE sync_jobs
+       SET messages_processed = $2, locked_at = NOW()
+       WHERE id = $1 AND status IN ('fetching', 'parsing')
+       RETURNING *`,
       [jobId, processed]
-    );
+    ).then((r) => r.rows[0] || null);
   },
 
   /** Stream newly detected loyalty discovery immediately for live client dopamine feed. */
@@ -249,9 +253,10 @@ export const EmailSyncRepo = {
            programs_updated = programs_updated + 1,
            messages_processed = $3,
            locked_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1 AND status IN ('fetching', 'parsing')
+       RETURNING *`,
       [jobId, JSON.stringify([detection]), processed]
-    );
+    ).then((r) => r.rows[0] || null);
   },
 
   /** Record rejected/skipped email for diagnostics and AI improvement (capped to latest 100). */
@@ -265,9 +270,10 @@ export const EmailSyncRepo = {
            END,
            messages_processed = $3,
            locked_at = NOW()
-       WHERE id = $1`,
+       WHERE id = $1 AND status IN ('fetching', 'parsing')
+       RETURNING *`,
       [jobId, JSON.stringify([rejectedEmail]), processed]
-    );
+    ).then((r) => r.rows[0] || null);
   },
 
   /**
@@ -320,9 +326,10 @@ export const EmailSyncRepo = {
        SET status = 'completed', total_messages_found = $1, messages_processed = $2,
            programs_updated = $3,
            worker_id = NULL, locked_at = NULL, completed_at = NOW()
-       WHERE id = $4`,
+       WHERE id = $4 AND status IN ('fetching', 'parsing')
+       RETURNING *`,
       [stats.scanned, stats.processed, stats.programsUpdated, jobId]
-    );
+    ).then((r) => r.rows[0] || null);
   },
 
   markJobFailed(jobId, errorMessage) {
@@ -330,9 +337,46 @@ export const EmailSyncRepo = {
       `UPDATE sync_jobs
        SET status = 'failed', error_details = $1, last_error = $1,
            worker_id = NULL, locked_at = NULL, completed_at = NOW()
-       WHERE id = $2`,
+       WHERE id = $2 AND status IN ('queued', 'fetching', 'parsing')
+       RETURNING *`,
       [errorMessage, jobId]
-    );
+    ).then((r) => r.rows[0] || null);
+  },
+
+  cancelJob(jobId, userId) {
+    return query(
+      `UPDATE sync_jobs
+       SET status = 'cancelled'::sync_job_status,
+           completed_at = NOW(),
+           last_error = 'Scan stopped by user.',
+           worker_id = NULL,
+           locked_at = NULL
+       WHERE id = $1 AND user_id = $2 AND status IN ('queued', 'fetching', 'parsing')
+       RETURNING *`,
+      [jobId, userId]
+    ).then((r) => r.rows[0] || null);
+  },
+
+  cancelAllActiveJobs(userId) {
+    return query(
+      `UPDATE sync_jobs
+       SET status = 'cancelled'::sync_job_status,
+           completed_at = NOW(),
+           last_error = 'Scan stopped by user.',
+           worker_id = NULL,
+           locked_at = NULL
+       WHERE user_id = $1 AND status IN ('queued', 'fetching', 'parsing')
+       RETURNING *`,
+      [userId]
+    ).then((r) => r.rows);
+  },
+
+  isJobCancelled(jobId) {
+    if (!jobId) return Promise.resolve(false);
+    return query(
+      `SELECT 1 FROM sync_jobs WHERE id = $1 AND status = 'cancelled'`,
+      [jobId]
+    ).then((r) => r.rowCount > 0);
   },
 
   // ── statement persistence ──────────────────────────────────────

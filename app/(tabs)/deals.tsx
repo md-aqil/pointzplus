@@ -24,11 +24,13 @@ import {
   ChevronDown,
   ChevronUp,
   Zap,
+  Lock,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
+import { AuthGateModal } from "../../components/ui/AuthGateModal";
 import { apiClient } from "../../lib/apiClient";
 import { logger } from "../../lib/logger";
 import { getIconComponentByName } from "../../constants/popularPrograms";
@@ -65,6 +67,7 @@ export default function DealsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [expandedTermsId, setExpandedTermsId] = useState<string | null>(null);
+  const [authGateVisible, setAuthGateVisible] = useState(false);
 
   // Clear the "copied" reset timer on unmount (avoid setState after unmount).
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -126,6 +129,11 @@ export default function DealsScreen() {
   };
 
   const handleCopyCode = async (deal: DealItem) => {
+    if (!isAuthenticated) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setAuthGateVisible(true);
+      return;
+    }
     if (!deal.code) return;
     await Clipboard.setStringAsync(deal.code);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -138,6 +146,11 @@ export default function DealsScreen() {
   };
 
   const handleOpenDeal = (url: string) => {
+    if (!isAuthenticated) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setAuthGateVisible(true);
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (url && url !== "#") {
       Linking.openURL(url).catch((err) =>
@@ -397,20 +410,35 @@ export default function DealsScreen() {
                               : "bg-[#F0FAFF] border-[#BAE3F8]"
                           }`}
                         >
-                          {isCopied ? (
-                            <Check size={13} color="#10B981" className="mr-1.5" />
+                          {!isAuthenticated ? (
+                            <>
+                              <Lock size={13} color="#01A2FB" className="mr-1.5" />
+                              <Text
+                                style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                                className="text-xs text-[#01A2FB]"
+                                numberOfLines={1}
+                              >
+                                Unlock Code
+                              </Text>
+                            </>
                           ) : (
-                            <Copy size={13} color="#01A2FB" className="mr-1.5" />
+                            <>
+                              {isCopied ? (
+                                <Check size={13} color="#10B981" className="mr-1.5" />
+                              ) : (
+                                <Copy size={13} color="#01A2FB" className="mr-1.5" />
+                              )}
+                              <Text
+                                style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                                className={`text-xs ${
+                                  isCopied ? "text-emerald-700" : "text-[#01A2FB]"
+                                }`}
+                                numberOfLines={1}
+                              >
+                                {isCopied ? "COPIED" : deal.code}
+                              </Text>
+                            </>
                           )}
-                          <Text
-                            style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                            className={`text-xs ${
-                              isCopied ? "text-emerald-700" : "text-[#01A2FB]"
-                            }`}
-                            numberOfLines={1}
-                          >
-                            {isCopied ? "COPIED" : deal.code}
-                          </Text>
                         </TouchableOpacity>
                       ) : (
                         <View className="flex-1 mr-2.5 bg-[#F0FAFF] px-3 py-2.5 rounded-xl border border-[#BAE3F8] items-center justify-center">
@@ -554,20 +582,35 @@ export default function DealsScreen() {
                             : "bg-[#F8FDFF] border-[#D0EEFA]"
                         }`}
                       >
-                        {isCopied ? (
-                          <Check size={14} color="#10B981" className="mr-1.5" />
+                        {!isAuthenticated ? (
+                          <>
+                            <Lock size={14} color="#01A2FB" className="mr-1.5" />
+                            <Text
+                              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                              className="text-xs text-[#01A2FB]"
+                              numberOfLines={1}
+                            >
+                              Unlock Code
+                            </Text>
+                          </>
                         ) : (
-                          <Copy size={14} color="#01A2FB" className="mr-1.5" />
+                          <>
+                            {isCopied ? (
+                              <Check size={14} color="#10B981" className="mr-1.5" />
+                            ) : (
+                              <Copy size={14} color="#01A2FB" className="mr-1.5" />
+                            )}
+                            <Text
+                              style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                              className={`text-xs ${
+                                isCopied ? "text-emerald-700" : "text-[#01A2FB]"
+                              }`}
+                              numberOfLines={1}
+                            >
+                              {isCopied ? "COPIED" : deal.code}
+                            </Text>
+                          </>
                         )}
-                        <Text
-                          style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                          className={`text-xs ${
-                            isCopied ? "text-emerald-700" : "text-[#01A2FB]"
-                          }`}
-                          numberOfLines={1}
-                        >
-                          {isCopied ? "COPIED" : deal.code}
-                        </Text>
                       </TouchableOpacity>
                     ) : (
                       <View className="flex-1 mr-3 bg-[#F0FAFE] px-3.5 py-2.5 rounded-xl border border-[#E6F3FA] items-center justify-center">
@@ -653,6 +696,13 @@ export default function DealsScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Auth Gate Modal Sheet */}
+      <AuthGateModal
+        visible={authGateVisible}
+        onClose={() => setAuthGateVisible(false)}
+        context="deals"
+      />
     </SafeAreaView>
   );
 }

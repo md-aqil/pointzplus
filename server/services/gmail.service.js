@@ -20,6 +20,9 @@ const PROGRESS_UPDATE_EVERY = 5;
 // Maximum rejected diagnostic entries streamed into a single sync_jobs row to prevent DB JSON bloat
 const MAX_STREAMED_REJECTED = 200;
 
+// Set of in-memory active job IDs flagged for cancellation by user
+const CANCELLED_JOBS = new Set();
+
 export function createOAuthClient() {
   return new google.auth.OAuth2(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI);
 }
@@ -293,17 +296,20 @@ export function findDocumentAndImageAttachments(payload) {
   return attachments;
 }
 
-async function fetchAttachmentData(gmail, messageId, attachmentId) {
+async function fetchAttachmentData(gmail, messageId, attachmentId, isCancelled = null) {
+  if (isCancelled && isCancelled()) return null;
   try {
     const res = await gmail.users.messages.attachments.get({
       userId: 'me',
       messageId,
       id: attachmentId,
     });
+    if (isCancelled && isCancelled()) return null;
     const rawData = res.data?.data;
     if (!rawData) return null;
     return rawData.replace(/-/g, '+').replace(/_/g, '/');
   } catch (err) {
+    if (isCancelled && isCancelled()) return null;
     console.warn(`[GmailService] Attachment fetch failed for ${attachmentId}:`, err.message);
     return null;
   }
@@ -368,21 +374,26 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * `Total Query Cost` quota; without backoff every remaining message fails and
  * the scan silently records 0 programs.
  */
-async function fetchMessageWithBackoff(gmail, id) {
+async function fetchMessageWithBackoff(gmail, id, isCancelled = null) {
   let lastErr;
   for (let attempt = 0; attempt <= QUOTA_MAX_RETRIES; attempt++) {
+    if (isCancelled && isCancelled()) return null;
     try {
       if (FETCH_DELAY_MS) await sleep(FETCH_DELAY_MS);
+      if (isCancelled && isCancelled()) return null;
       return await gmail.users.messages.get({ userId: 'me', id, format: 'full' });
     } catch (err) {
+      if (isCancelled && isCancelled()) return null;
       lastErr = err;
       const isQuota = /quota|rateLimit|rate limit|429|403/i.test(err.message || '');
       if (!isQuota || attempt === QUOTA_MAX_RETRIES) break;
       // 1s, 2s, 4s, 8s — enough headroom for the quota window to reopen.
       await sleep(1000 * 2 ** attempt);
+      if (isCancelled && isCancelled()) return null;
       console.warn(`Gmail quota hit on message ${id}; retry ${attempt + 1}/${QUOTA_MAX_RETRIES}`);
     }
   }
+  if (isCancelled && isCancelled()) return null;
   throw lastErr;
 }
 
@@ -396,7 +407,51 @@ function resolveMaxResults() {
   return DEFAULT_MAX_RESULTS;
 }
 
+/**
+ * Executes async worker tasks with bounded concurrency.
+ */
+async function mapConcurrent(items, concurrency, fn, shouldStop) {
+  let index = 0;
+  const results = new Array(items.length);
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (index < items.length) {
+      if (shouldStop && shouldStop()) break;
+      const i = index++;
+      try {
+        results[i] = await fn(items[i], i);
+      } catch (err) {
+        console.error(`[GmailService] Worker error at index ${i}:`, err.message);
+        results[i] = null;
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 async function scanGmailMessages(account, { maxResults = null, historyId = null, jobId = null } = {}) {
+  let dbCancelled = false;
+  let lastDbCheck = 0;
+
+  const checkDbCancelled = async () => {
+    if (!jobId || dbCancelled) return dbCancelled;
+    const now = Date.now();
+    if (now - lastDbCheck >= 1000) {
+      lastDbCheck = now;
+      try {
+        const cancelled = await EmailSyncRepo.isJobCancelled(jobId);
+        if (cancelled) {
+          dbCancelled = true;
+          CANCELLED_JOBS.add(jobId);
+        }
+      } catch {
+        // ignore transient db errors
+      }
+    }
+    return dbCancelled;
+  };
+
+  const isCancelled = () => Boolean(jobId && (CANCELLED_JOBS.has(jobId) || dbCancelled));
   const cap = maxResults || resolveMaxResults();
   const oAuth2Client = createOAuthClient();
   const refreshPlaintext = decryptToken(
@@ -454,6 +509,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
       let pageToken = undefined;
 
       do {
+        if (isCancelled()) break;
         const pageSize = Math.min(500, cap - messages.length);
         if (pageSize <= 0) break;
 
@@ -463,6 +519,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
           maxResults: pageSize,
           pageToken,
         });
+        if (isCancelled()) break;
 
         const rawMessages = listRes.data?.messages || [];
         for (const m of rawMessages) {
@@ -473,7 +530,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
         }
 
         pageToken = listRes.data?.nextPageToken;
-        if (!pageToken || messages.length >= cap) {
+        if (!pageToken || messages.length >= cap || isCancelled()) {
           if (pageToken && messages.length >= cap) hasMore = true;
           break;
         }
@@ -488,6 +545,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
     let fallbackToken = undefined;
     try {
       do {
+        if (isCancelled()) break;
         const pageSize = Math.min(500, cap - messages.length);
         if (pageSize <= 0) break;
         const fallbackRes = await gmail.users.messages.list({
@@ -496,6 +554,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
           maxResults: pageSize,
           pageToken: fallbackToken,
         });
+        if (isCancelled()) break;
         const rawFallback = fallbackRes.data?.messages || [];
         for (const m of rawFallback) {
           if (!seenFallback.has(m.id)) {
@@ -504,7 +563,7 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
           }
         }
         fallbackToken = fallbackRes.data?.nextPageToken;
-        if (!fallbackToken || messages.length >= cap) {
+        if (!fallbackToken || messages.length >= cap || isCancelled()) {
           if (fallbackToken && messages.length >= cap) hasMore = true;
           break;
         }
@@ -515,32 +574,24 @@ async function scanGmailMessages(account, { maxResults = null, historyId = null,
     }
   }
 
+  if (isCancelled()) {
+    return {
+      scanned: messages.length,
+      processed: 0,
+      programsAdded: 0,
+      programsUpdated: 0,
+      accounts: [],
+      rejectedEmails: [],
+      hasMore: false,
+      cancelled: true,
+    };
+  }
+
   // Fetching is done. Publish the parse phase and the real match count so the
   // app's progress bar reflects actual work instead of a guessed animation.
   if (jobId) {
     await EmailSyncRepo.markJobParsing(jobId, messages.length);
   }
-
-/**
- * Executes async worker tasks with bounded concurrency.
- */
-async function mapConcurrent(items, concurrency, fn) {
-  let index = 0;
-  const results = new Array(items.length);
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (index < items.length) {
-      const i = index++;
-      try {
-        results[i] = await fn(items[i], i);
-      } catch (err) {
-        console.error(`[GmailService] Worker error at index ${i}:`, err.message);
-        results[i] = null;
-      }
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
 
   const concurrency = Math.max(1, Math.min(12, Number.parseInt(process.env.SYNC_CONCURRENCY || '6', 10) || 6));
   const detectedAccounts = [];
@@ -549,113 +600,142 @@ async function mapConcurrent(items, concurrency, fn) {
   let programsUpdated = 0;
   let processed = 0;
 
-  await mapConcurrent(messages, concurrency, async (msg) => {
-    try {
-      const detail = await fetchMessageWithBackoff(gmail, msg.id);
-      if (!detail?.data?.payload) {
-        processed += 1;
-        return;
-      }
+  await mapConcurrent(
+    messages,
+    concurrency,
+    async (msg) => {
+      await checkDbCancelled();
+      if (isCancelled()) return;
+      try {
+        const detail = await fetchMessageWithBackoff(gmail, msg.id, isCancelled);
+        if (isCancelled() || !detail?.data?.payload) {
+          processed += 1;
+          return;
+        }
 
-      const headers = detail.data.payload.headers || [];
-      const fromHeader = headers.find((h) => h.name.toLowerCase() === 'from')?.value || '';
-      const subjectHeader = headers.find((h) => h.name.toLowerCase() === 'subject')?.value || '';
-      const dateHeader = headers.find((h) => h.name.toLowerCase() === 'date')?.value || new Date();
-      const { text, html } = extractBodyParts(detail.data.payload);
-      const preview = (text || html.replace(/<[^>]+>/g, ' ')).substring(0, 200);
+        const headers = detail.data.payload.headers || [];
+        const fromHeader = headers.find((h) => h.name.toLowerCase() === 'from')?.value || '';
+        const subjectHeader = headers.find((h) => h.name.toLowerCase() === 'subject')?.value || '';
+        const dateHeader = headers.find((h) => h.name.toLowerCase() === 'date')?.value || new Date();
+        const { text, html } = extractBodyParts(detail.data.payload);
+        const preview = (text || html.replace(/<[^>]+>/g, ' ')).substring(0, 200);
 
-      const attachmentMetaList = findDocumentAndImageAttachments(detail.data.payload);
-      const attachments = [];
+        const attachmentMetaList = findDocumentAndImageAttachments(detail.data.payload);
+        const attachments = [];
 
-      // Download attached statement PDFs and promotional banners (up to 2 per message, max 10MB each)
-      if (attachmentMetaList.length > 0) {
-        for (const meta of attachmentMetaList.slice(0, 2)) {
-          if (meta.size && meta.size > 10 * 1024 * 1024) continue;
-          const base64Data = await fetchAttachmentData(gmail, msg.id, meta.attachmentId);
-          if (base64Data) {
-            attachments.push({
-              filename: meta.filename,
-              mimeType: meta.mimeType,
-              base64Data,
-              isPdf: meta.isPdf,
-              isImage: meta.isImage,
-            });
+        // Download attached statement PDFs and promotional banners (up to 2 per message, max 10MB each)
+        if (attachmentMetaList.length > 0) {
+          for (const meta of attachmentMetaList.slice(0, 2)) {
+            if (isCancelled()) return;
+            if (meta.size && meta.size > 10 * 1024 * 1024) continue;
+            const base64Data = await fetchAttachmentData(gmail, msg.id, meta.attachmentId, isCancelled);
+            if (isCancelled()) return;
+            if (base64Data) {
+              attachments.push({
+                filename: meta.filename,
+                mimeType: meta.mimeType,
+                base64Data,
+                isPdf: meta.isPdf,
+                isImage: meta.isImage,
+              });
+            }
           }
         }
-      }
 
-      const parsed = await AIStatementParser.parseEmail({
-        messageId: msg.id,
-        fromHeader,
-        subjectHeader,
-        bodyText: text,
-        bodyHtml: html,
-        receivedDate: dateHeader,
-        pdfAttachments: attachments,
-        attachments,
-      });
+        if (isCancelled()) return;
 
-      if (parsed.isLoyaltyStatement && parsed.loyaltyData) {
-        const persist = await persistLoyaltyResult(
-          account.user_id, parsed, fromHeader, subjectHeader,
-          new Date(dateHeader), preview, 'gmail', account.id
-        );
-        if (persist.added) programsAdded += 1;
-        if (persist.updated) programsUpdated += 1;
-        const detectionObj = {
-          from: fromHeader,
-          domain: extractDomain(fromHeader),
-          subject: subjectHeader,
-          receivedAt: new Date(dateHeader),
-          preview,
-          programName: persist.program?.name || parsed.loyaltyData.programName || extractDomain(fromHeader),
-          category: persist.program?.category || 'other',
-          balance: parsed.loyaltyData.balance ?? 0,
-          accountNumber: parsed.loyaltyData.accountNumber || null,
-          foundAt: new Date().toISOString(),
-          ...parsed.loyaltyData,
-        };
-        detectedAccounts.push(detectionObj);
-
-        processed += 1;
-        // Stream newly discovered points immediately to sync_jobs.live_detections for the live dopamine feed!
-        if (jobId) {
-          await EmailSyncRepo.recordLiveDetection(jobId, {
-            programName: detectionObj.programName,
-            category: detectionObj.category,
-            balance: detectionObj.balance,
-            accountNumber: detectionObj.accountNumber,
-            foundAt: detectionObj.foundAt,
-          }, processed);
-        }
-      } else {
-        const rejectedObj = sanitizeRejectedEmail({
+        const parsed = await AIStatementParser.parseEmail({
           messageId: msg.id,
           fromHeader,
           subjectHeader,
-          dateHeader,
-          preview,
-          parsed,
-          hasAttachments: attachments.length > 0,
+          bodyText: text,
+          bodyHtml: html,
+          receivedDate: dateHeader,
+          pdfAttachments: attachments,
+          attachments,
+          isCancelled,
         });
-        rejectedEmails.push(rejectedObj);
 
+        if (isCancelled()) return;
+
+        if (parsed.isLoyaltyStatement && parsed.loyaltyData) {
+          const persist = await persistLoyaltyResult(
+            account.user_id, parsed, fromHeader, subjectHeader,
+            new Date(dateHeader), preview, 'gmail', account.id
+          );
+          if (isCancelled()) return;
+          if (persist.added) programsAdded += 1;
+          if (persist.updated) programsUpdated += 1;
+          const detectionObj = {
+            from: fromHeader,
+            domain: extractDomain(fromHeader),
+            subject: subjectHeader,
+            receivedAt: new Date(dateHeader),
+            preview,
+            programName: persist.program?.name || parsed.loyaltyData.programName || extractDomain(fromHeader),
+            category: persist.program?.category || 'other',
+            balance: parsed.loyaltyData.balance ?? 0,
+            accountNumber: parsed.loyaltyData.accountNumber || null,
+            foundAt: new Date().toISOString(),
+            ...parsed.loyaltyData,
+          };
+          detectedAccounts.push(detectionObj);
+
+          processed += 1;
+          // Stream newly discovered points immediately to sync_jobs.live_detections for the live dopamine feed!
+          if (jobId && !isCancelled()) {
+            await EmailSyncRepo.recordLiveDetection(jobId, {
+              programName: detectionObj.programName,
+              category: detectionObj.category,
+              balance: detectionObj.balance,
+              accountNumber: detectionObj.accountNumber,
+              foundAt: detectionObj.foundAt,
+            }, processed);
+          }
+        } else {
+          const rejectedObj = sanitizeRejectedEmail({
+            messageId: msg.id,
+            fromHeader,
+            subjectHeader,
+            dateHeader,
+            preview,
+            parsed,
+            hasAttachments: attachments.length > 0,
+          });
+          rejectedEmails.push(rejectedObj);
+
+          processed += 1;
+          // Stream sanitized rejected diagnostic to sync_jobs (capped to avoid JSON bloat)
+          if (jobId && !isCancelled() && rejectedEmails.length <= MAX_STREAMED_REJECTED) {
+            await EmailSyncRepo.recordRejectedEmail(jobId, rejectedObj, processed);
+          } else if (jobId && !isCancelled() && processed % PROGRESS_UPDATE_EVERY === 0) {
+            await EmailSyncRepo.updateJobProgress(jobId, processed);
+          }
+        }
+      } catch (msgErr) {
+        if (isCancelled()) return;
         processed += 1;
-        // Stream sanitized rejected diagnostic to sync_jobs (capped to avoid JSON bloat)
-        if (jobId && rejectedEmails.length <= MAX_STREAMED_REJECTED) {
-          await EmailSyncRepo.recordRejectedEmail(jobId, rejectedObj, processed);
-        } else if (jobId && processed % PROGRESS_UPDATE_EVERY === 0) {
+        console.error(`Error parsing message ${msg.id}:`, msgErr.message);
+        if (jobId && !isCancelled() && processed % PROGRESS_UPDATE_EVERY === 0) {
           await EmailSyncRepo.updateJobProgress(jobId, processed);
         }
       }
-    } catch (msgErr) {
-      processed += 1;
-      console.error(`Error parsing message ${msg.id}:`, msgErr.message);
-      if (jobId && processed % PROGRESS_UPDATE_EVERY === 0) {
-        await EmailSyncRepo.updateJobProgress(jobId, processed);
-      }
-    }
-  });
+    },
+    isCancelled
+  );
+
+  if (isCancelled()) {
+    return {
+      scanned: messages.length,
+      processed,
+      programsAdded,
+      programsUpdated,
+      accounts: detectedAccounts,
+      rejectedEmails,
+      hasMore,
+      cancelled: true,
+    };
+  }
 
   const profile = await gmail.users.getProfile({ userId: 'me' }).catch(() => null);
   const nextHistoryId = profile?.data?.historyId || historyId || account.history_id;
@@ -699,20 +779,36 @@ export async function processSyncJob(job) {
     throw new Error('no connected sync account');
   }
 
+  // If already cancelled before processing starts
+  if (CANCELLED_JOBS.has(job.id) || (await EmailSyncRepo.isJobCancelled(job.id))) {
+    CANCELLED_JOBS.delete(job.id);
+    return { cancelled: true };
+  }
+
   const tier1Cap = Number.parseInt(process.env.SYNC_TIER1_MAX_RESULTS || '100', 10) || 100;
   const maxResults = isBackfill ? 10000 : tier1Cap;
 
   try {
     const result = await scanGmailMessages(account, { jobId: job.id, maxResults });
-    await EmailSyncRepo.markJobCompleted(job.id, {
+    const isCancelledInDb = await EmailSyncRepo.isJobCancelled(job.id);
+    if (CANCELLED_JOBS.has(job.id) || result?.cancelled || isCancelledInDb) {
+      CANCELLED_JOBS.delete(job.id);
+      return { ...result, cancelled: true };
+    }
+    const completed = await EmailSyncRepo.markJobCompleted(job.id, {
       scanned: result.scanned,
       processed: result.processed,
       programsUpdated: result.programsAdded + result.programsUpdated,
     });
 
+    if (!completed) {
+      // The job was not in active status (e.g. cancelled by user in DB during processing)
+      return { ...result, cancelled: true };
+    }
+
     // Option 2 (2-Tier Progressive Sync):
     // If Tier 1 completed and there are remaining historical statements, queue Tier 2 (Deep Background Backfill)
-    if (!isBackfill && result.hasMore) {
+    if (!isBackfill && result.hasMore && !CANCELLED_JOBS.has(job.id) && !(await EmailSyncRepo.isJobCancelled(job.id))) {
       const activeBackfill = await EmailSyncRepo.findActiveJob(job.user_id, account.id);
       if (!activeBackfill) {
         await EmailSyncRepo.createJob(job.user_id, 'gmail_backfill', account.id);
@@ -722,6 +818,11 @@ export async function processSyncJob(job) {
 
     return result;
   } catch (err) {
+    const isCancelledInDb = await EmailSyncRepo.isJobCancelled(job.id).catch(() => false);
+    if (CANCELLED_JOBS.has(job.id) || isCancelledInDb) {
+      CANCELLED_JOBS.delete(job.id);
+      return { cancelled: true };
+    }
     let friendlyError = err.message || 'Gmail sync failed';
     if (
       friendlyError.includes('Insufficient Permission') ||
@@ -732,6 +833,8 @@ export async function processSyncJob(job) {
     }
     await EmailSyncRepo.markJobFailed(job.id, friendlyError);
     throw new Error(friendlyError);
+  } finally {
+    CANCELLED_JOBS.delete(job.id);
   }
 }
 
@@ -914,6 +1017,73 @@ export const gmailService = {
 
   getJob(jobId, userId) {
     return EmailSyncRepo.getJob(jobId, userId);
+  },
+
+  async cancelJob(jobId, userId) {
+    if (!jobId) {
+      return {
+        status: 400,
+        body: {
+          success: false,
+          error: 'Job ID is required.',
+        },
+      };
+    }
+    const updated = await EmailSyncRepo.cancelJob(jobId, userId);
+    if (!updated) {
+      const existing = await EmailSyncRepo.getJob(jobId, userId);
+      if (!existing) {
+        return {
+          status: 404,
+          body: {
+            success: false,
+            error: 'Scan job not found or does not belong to user.',
+          },
+        };
+      }
+      return {
+        status: 409,
+        body: {
+          success: false,
+          message: `Job is already in a terminal state (${existing.status}).`,
+          job: existing,
+        },
+      };
+    }
+    CANCELLED_JOBS.add(jobId);
+    return {
+      status: 200,
+      body: {
+        success: true,
+        message: 'Scan cancelled successfully.',
+        job: updated,
+      },
+    };
+  },
+
+  async cancelActiveJob(userId) {
+    const cancelled = await EmailSyncRepo.cancelAllActiveJobs(userId);
+    for (const j of cancelled) {
+      CANCELLED_JOBS.add(j.id);
+    }
+    if (cancelled.length === 0) {
+      return {
+        status: 200,
+        body: {
+          success: true,
+          message: 'No active scan jobs to cancel.',
+          cancelledJobs: [],
+        },
+      };
+    }
+    return {
+      status: 200,
+      body: {
+        success: true,
+        message: `Cancelled ${cancelled.length} active scan job(s).`,
+        cancelledJobs: cancelled,
+      },
+    };
   },
 
   listAccounts(userId) {

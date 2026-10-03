@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Image,
   RefreshControl,
+  Alert,
+  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -24,6 +26,7 @@ import { BrandPointCard } from "../../components/cards/BrandPointCard";
 import { LiveDiscoveryCard } from "../../components/cards/LiveDiscoveryCard";
 import { usePoints } from "../../hooks/usePoints";
 import { useAuth } from "../../hooks/useAuth";
+import { useStopMailboxScan } from "../../hooks/useStopMailboxScan";
 import { formatNameFromEmail } from "../../store/authStore";
 import {
   CATEGORY_LABELS,
@@ -92,9 +95,13 @@ export default function HomeScreen() {
     isSyncing,
     isBackfillRunning,
     activeJobDetails,
+    cancelSyncJob,
   } = usePoints();
+  const { isStoppingScan, handleStopScan } = useStopMailboxScan();
   const [refreshing, setRefreshing] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
+
+  const hasActiveJob = Boolean(isSyncing || isBackfillRunning || activeJobDetails?.id);
 
   React.useEffect(() => {
     if (isAuthenticated) {
@@ -437,15 +444,15 @@ export default function HomeScreen() {
             <>
               {/* Background Scan Notification Pill if deep backfill is scanning */}
               {isBackfillRunning && (
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    router.push("/sync-rejected");
-                  }}
-                  className="bg-white border border-sky-200/80 rounded-2xl p-3 mb-3.5 flex-row items-center justify-between shadow-xs"
-                >
-                  <View className="flex-row items-center flex-1 mr-2">
+                <View className="bg-white border border-sky-200/80 rounded-2xl p-3 mb-3.5 flex-row items-center justify-between shadow-xs">
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      router.push("/sync-rejected");
+                    }}
+                    className="flex-row items-center flex-1 mr-2"
+                  >
                     <View className="w-2 h-2 rounded-full bg-[#00A3FF] mr-2" />
                     <View className="flex-1">
                       <Text
@@ -463,16 +470,38 @@ export default function HomeScreen() {
                           : "AI scanner is evaluating past reward emails"}
                       </Text>
                     </View>
-                  </View>
-                  <View className="bg-sky-50 border border-sky-100 px-2 py-0.5 rounded-full">
-                    <Text
-                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                      className="text-[10px] text-[#00A3FF]"
+                  </TouchableOpacity>
+                  <View className="flex-row items-center space-x-1.5 gap-1.5">
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      disabled={isStoppingScan || !hasActiveJob}
+                      onPress={handleStopScan}
+                      className="bg-red-50 border border-red-100 px-2 py-0.5 rounded-full"
                     >
-                      Inspect
-                    </Text>
+                      <Text
+                        style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                        className="text-[10px] text-red-500"
+                      >
+                        {isStoppingScan ? "Stopping..." : "Stop"}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        router.push("/sync-rejected");
+                      }}
+                      className="bg-sky-50 border border-sky-100 px-2 py-0.5 rounded-full"
+                    >
+                      <Text
+                        style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                        className="text-[10px] text-[#00A3FF]"
+                      >
+                        Inspect
+                      </Text>
+                    </TouchableOpacity>
                   </View>
-                </TouchableOpacity>
+                </View>
               )}
 
               {/* Live Discovery Stream (Latest Points Found) */}

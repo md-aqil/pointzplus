@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { storage } from './storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import type {
@@ -68,36 +68,19 @@ class ApiClient {
 
   setToken(token: string) {
     this.token = token;
-    if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
-      try {
-        localStorage.setItem(TOKEN_STORAGE_KEY, token);
-      } catch {}
-    } else {
-      SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token).catch(() => {});
-    }
+    storage.setItemAsync(TOKEN_STORAGE_KEY, token).catch(() => {});
   }
 
   clearToken() {
     this.token = null;
-    if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
-      try {
-        localStorage.removeItem(TOKEN_STORAGE_KEY);
-      } catch {}
-    } else {
-      SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
-    }
+    storage.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
   }
 
   /** Load the persisted token into memory (call once on app startup or before authenticated requests). */
   async restoreToken(): Promise<string | null> {
     if (this.token) return this.token;
     try {
-      if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
-        const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
-        if (stored) this.token = stored;
-        return this.token;
-      }
-      const stored = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
+      const stored = await storage.getItemAsync(TOKEN_STORAGE_KEY);
       if (stored) this.token = stored;
       return this.token;
     } catch {
@@ -185,6 +168,19 @@ class ApiClient {
   async logout() {
     try {
       return await this.request<{ message: string }>('/auth/logout', {
+        method: 'POST',
+      });
+    } catch {
+      return null;
+    } finally {
+      this.clearToken();
+    }
+  }
+
+  /** Revoke every outstanding session for this user (bumps server-side token_version). */
+  async logoutAll() {
+    try {
+      return await this.request<{ message: string }>('/auth/logout-all', {
         method: 'POST',
       });
     } catch {
@@ -282,8 +278,26 @@ class ApiClient {
     return this.request<SyncJob>(`/email-sync/jobs/${jobId}`);
   }
 
+  async cancelSyncJob(jobId: string) {
+    return this.request<{ success: boolean; message?: string; job: SyncJob | null }>(
+      `/email-sync/jobs/${jobId}/cancel`,
+      {
+        method: 'POST',
+      }
+    );
+  }
+
   async getActiveSyncJob() {
     return this.request<{ activeJob: SyncJob | null; isSyncing: boolean }>('/email-sync/active-job');
+  }
+
+  async cancelActiveSyncJob() {
+    return this.request<{ success: boolean; message?: string; cancelledJobs: SyncJob[] }>(
+      '/email-sync/cancel-active',
+      {
+        method: 'POST',
+      }
+    );
   }
 
   async getEmailStatements(limit = 200, includePreview = true) {

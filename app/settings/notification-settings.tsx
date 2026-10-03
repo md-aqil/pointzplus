@@ -309,7 +309,7 @@ export default function NotificationSettingsScreen() {
         >
           <Pressable
             onPress={(e) => e.stopPropagation()}
-            className="w-full bg-white rounded-3xl p-6 shadow-2xl"
+            className="w-full max-w-[393px] bg-white rounded-3xl p-6 shadow-2xl"
           >
             {/* Modal Header */}
             <View className="flex-row items-start justify-between">

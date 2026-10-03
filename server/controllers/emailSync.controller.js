@@ -206,4 +206,14 @@ export const emailSyncController = {
     const job = await EmailSyncRepo.findAnyActiveJob(req.userId);
     res.json({ activeJob: job || null, isSyncing: Boolean(job) });
   }),
+
+  cancelJob: asyncHandler(async (req, res) => {
+    const result = await gmailService.cancelJob(req.params.id, req.userId);
+    res.status(result.status).json(result.body);
+  }),
+
+  cancelActiveJob: asyncHandler(async (req, res) => {
+    const result = await gmailService.cancelActiveJob(req.userId);
+    res.status(result.status).json(result.body);
+  }),
 };

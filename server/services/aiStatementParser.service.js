@@ -55,7 +55,12 @@ const AI_TIMEOUT_MS = Math.max(1, Number.parseInt(process.env.AI_TIMEOUT_MS || '
 const AI_MAX_RETRIES = Math.max(0, Number.parseInt(process.env.AI_MAX_RETRIES || '1', 10) || 1);
 const aiSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchWithTimeout(url, options, timeoutMs = AI_TIMEOUT_MS) {
+async function fetchWithTimeout(url, options, timeoutMs = AI_TIMEOUT_MS, isCancelled = null) {
+  if (isCancelled && isCancelled()) {
+    const err = new Error('Operation cancelled');
+    err.name = 'AbortError';
+    throw err;
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -68,11 +73,13 @@ async function fetchWithTimeout(url, options, timeoutMs = AI_TIMEOUT_MS) {
 /** An error that must not be retried (4xx other than 429). */
 class PermanentProviderError extends Error {}
 
-async function callProvider(name, url, options) {
+async function callProvider(name, url, options, isCancelled = null) {
   let lastErr;
   for (let attempt = 0; attempt <= AI_MAX_RETRIES; attempt++) {
+    if (isCancelled && isCancelled()) return null;
     try {
-      const response = await fetchWithTimeout(url, options);
+      const response = await fetchWithTimeout(url, options, AI_TIMEOUT_MS, isCancelled);
+      if (isCancelled && isCancelled()) return null;
       if (response.ok) return response;
 
       const status = response.status;
@@ -83,18 +90,21 @@ async function callProvider(name, url, options) {
       if (!transient) throw new PermanentProviderError(`${name} HTTP ${status}: ${errText}`);
       lastErr = new Error(`${name} HTTP ${status}`);
     } catch (err) {
+      if (isCancelled && isCancelled()) return null;
       if (err instanceof PermanentProviderError) throw err;
       // Network errors and aborts (timeout) are transient.
       lastErr = err;
     }
 
-    if (attempt === AI_MAX_RETRIES) break;
+    if (attempt === AI_MAX_RETRIES || (isCancelled && isCancelled())) break;
     const backoff = 750 * 2 ** attempt;
     console.warn(
       `[AIStatementParser] ${name} attempt ${attempt + 1} failed (${lastErr.message}); retrying in ${backoff}ms`
     );
     await aiSleep(backoff);
+    if (isCancelled && isCancelled()) return null;
   }
+  if (isCancelled && isCancelled()) return null;
   throw lastErr;
 }
 
@@ -111,7 +121,17 @@ export class AIStatementParser {
     bodyHtml = '',
     receivedDate = new Date().toISOString(),
     pdfAttachments = [],
+    isCancelled = null,
   }) {
+    if (isCancelled && isCancelled()) {
+      return {
+        messageIdHash: '',
+        isLoyaltyStatement: false,
+        loyaltyData: null,
+        cancelled: true,
+      };
+    }
+
     const messageIdHash = StatementParser.generateMessageHash(
       messageId,
       fromHeader,
@@ -139,6 +159,15 @@ export class AIStatementParser {
           loyaltyData: ruleResult.loyaltyData,
         };
       }
+    }
+
+    if (isCancelled && isCancelled()) {
+      return {
+        messageIdHash,
+        isLoyaltyStatement: false,
+        loyaltyData: null,
+        cancelled: true,
+      };
     }
 
     // 2. Candidate Gating: If not matched by regex and no PDF, only call LLM if email has loyalty signals
@@ -169,6 +198,7 @@ export class AIStatementParser {
           bodyHtml,
           receivedDate,
           pdfAttachments,
+          isCancelled,
         });
 
         if (aiResult) {
@@ -391,11 +421,11 @@ Respond ONLY with valid JSON conforming to this schema:
     // 2. For all Text, HTML, and extracted PDF Statements -> use DeepSeek-V3 (deepseek-chat)
     // 3. Fallback to Gemini 2.0 Flash if DeepSeek is not configured
     if ((hasImages || hasUnreadPdfs) && geminiKey) {
-      return this.callGemini(prompt, hasImages ? imageAttachments : rawPdfAttachments);
+      return this.callGemini(prompt, hasImages ? imageAttachments : rawPdfAttachments, isCancelled);
     } else if (deepSeekKey && cleanBody) {
-      return this.callDeepSeek(prompt);
+      return this.callDeepSeek(prompt, isCancelled);
     } else if (geminiKey) {
-      return this.callGemini(prompt, allAttachments);
+      return this.callGemini(prompt, allAttachments, isCancelled);
     } else if (hasUnreadPdfs) {
       // PDF was attached but could not be decompressed/read and no vision multimodal fallback was configured
       return {
@@ -403,12 +433,13 @@ Respond ONLY with valid JSON conforming to this schema:
         reason: 'PDF_UNREADABLE',
       };
     } else if (openAiKey) {
-      return this.callOpenAI(prompt);
+      return this.callOpenAI(prompt, isCancelled);
     }
     return null;
   }
 
-  static async callGemini(prompt, attachments = []) {
+  static async callGemini(prompt, attachments = [], isCancelled = null) {
+    if (isCancelled && isCancelled()) return null;
     const key = getGeminiApiKey();
     if (!key) return null;
     const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
@@ -443,15 +474,17 @@ Respond ONLY with valid JSON conforming to this schema:
           temperature: 0.1,
         },
       }),
-    });
+    }, isCancelled);
 
+    if (!response) return null;
     const data = await response.json();
     const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!candidateText) return null;
     return JSON.parse(candidateText);
   }
 
-  static async callOpenAI(prompt) {
+  static async callOpenAI(prompt, isCancelled = null) {
+    if (isCancelled && isCancelled()) return null;
     const key = getOpenAiApiKey();
     if (!key) return null;
     const url = 'https://api.openai.com/v1/chat/completions';
@@ -467,15 +500,17 @@ Respond ONLY with valid JSON conforming to this schema:
         response_format: { type: 'json_object' },
         temperature: 0.1,
       }),
-    });
+    }, isCancelled);
 
+    if (!response) return null;
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
     if (!content) return null;
     return JSON.parse(content);
   }
 
-  static async callDeepSeek(prompt) {
+  static async callDeepSeek(prompt, isCancelled = null) {
+    if (isCancelled && isCancelled()) return null;
     const key = getDeepSeekApiKey();
     if (!key) return null;
     const url = `${getDeepSeekBaseUrl().replace(/\/+$/, '')}/chat/completions`;
@@ -497,8 +532,9 @@ Respond ONLY with valid JSON conforming to this schema:
         response_format: { type: 'json_object' },
         temperature: 0.1,
       }),
-    });
+    }, isCancelled);
 
+    if (!response) return null;
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
     if (!content) return null;

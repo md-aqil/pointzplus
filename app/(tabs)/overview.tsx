@@ -14,15 +14,9 @@ import {
   Bell,
   ChevronRight,
   Mail,
-  Sparkles,
-  ArrowUpRight,
-  ArrowDownRight,
-  AlertTriangle,
   Zap,
-  CheckCircle2,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-import { DashboardTopBg } from "../../components/ui/DashboardTopBg";
 import { PointsDonutChart, ChartSegment } from "../../components/charts/PointsDonutChart";
 import { AuthRequiredView } from "../../components/ui/AuthRequiredView";
 import { usePoints } from "../../hooks/usePoints";
@@ -174,31 +168,18 @@ export default function OverviewScreen() {
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-[#F5FEFF]">
-      {/* Signature Penpot Top Gradient Banner */}
-      <View style={styles.topBgContainer}>
-        <DashboardTopBg />
-      </View>
-
       {/* App Header */}
-      <View className="px-4 pt-3 pb-3 flex-row items-center justify-between">
-        <View>
-          <View className="flex-row items-center space-x-1.5">
-            <Text
-              style={{ fontFamily: "PlusJakartaSans-Bold" }}
-              className="text-2xl text-white tracking-tight"
-            >
-              Point Overview
-            </Text>
-            {isSyncing && (
-              <ActivityIndicator size="small" color="#02EFF4" className="ml-2" />
-            )}
-          </View>
+      <View className="px-5 pt-3 pb-3 flex-row items-center justify-between">
+        <View className="flex-row items-center space-x-2">
           <Text
-            style={{ fontFamily: "PlusJakartaSans-Medium" }}
-            className="text-xs text-white/80 mt-0.5"
+            style={{ fontFamily: "PlusJakartaSans-Bold" }}
+            className="text-[22px] text-[#070617] tracking-tight"
           >
-            Live portfolio analytics & breakdown
+            Points Overview
           </Text>
+          {isSyncing && (
+            <ActivityIndicator size="small" color="#01A2FB" className="ml-2" />
+          )}
         </View>
 
         {/* Notifications Button */}
@@ -208,11 +189,11 @@ export default function OverviewScreen() {
             router.push("/notifications");
           }}
           activeOpacity={0.7}
-          className="w-11 h-11 rounded-2xl bg-white/15 border border-white/30 items-center justify-center relative backdrop-blur-md"
+          className="w-10 h-10 rounded-2xl bg-white border border-[#DCF0FA] items-center justify-center relative shadow-sm"
         >
-          <Bell size={19} color="#FFFFFF" />
+          <Bell size={18} color="#070617" />
           {unreadCount > 0 && (
-            <View className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-[#FF4343] border-2 border-[#070617]" />
+            <View className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-[#FF4343] border-2 border-white" />
           )}
         </TouchableOpacity>
       </View>
@@ -220,7 +201,7 @@ export default function OverviewScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 32 }}
-        className="px-3.5 pt-1"
+        className="px-4 pt-1"
         refreshControl={
           <RefreshControl
             refreshing={refreshing || isSyncing}
@@ -230,139 +211,38 @@ export default function OverviewScreen() {
           />
         }
       >
-        {/* ─── Hero Portfolio Metric Card ─────────────────────────── */}
-        <View style={styles.heroCard} className="w-full bg-white rounded-3xl p-4 mb-3.5 border border-[#DCF0FA]">
-          {/* Top Label & Sparkle */}
-          <View className="flex-row items-center justify-between mb-1.5">
-            <View className="flex-row items-center space-x-1.5">
-              <Sparkles size={14} color="#01A2FB" />
+        {/* ─── Hero Metric Card (Minimalist 2-Column: Total number & Redeem this month) ── */}
+        <View style={styles.heroCard} className="w-full bg-[#F5FEFF] border border-[#DCF2FD] rounded-3xl p-5 mb-4">
+          <View className="flex-row items-center justify-between">
+            {/* Left: Total Points */}
+            <View className="flex-1 pr-2">
               <Text
                 style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-[11px] uppercase tracking-wider text-[#01A2FB]"
-              >
-                Total Portfolio Balance
-              </Text>
-            </View>
-            <View className="bg-[#E6F8FF] border border-[#CBEBFC] px-2.5 py-0.5 rounded-full">
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-[11px] text-[#01A2FB]"
-              >
-                {linkedCount} {linkedCount === 1 ? "Program" : "Programs"}
-              </Text>
-            </View>
-          </View>
-
-          {/* Large Point Value & Currency Valuation */}
-          <View className="flex-row items-baseline justify-between mt-1 mb-4">
-            <View className="flex-row items-baseline">
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-3xl text-[#070617] tracking-tight"
+                className="text-[28px] text-[#070617] tracking-tight leading-8"
               >
                 {totalDisplay.toLocaleString()}
               </Text>
               <Text
+                style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                className="text-[13px] text-[#8E8E93] mt-1"
+              >
+                Total number
+              </Text>
+            </View>
+
+            {/* Right: Redeem this month */}
+            <View className="flex-1 pl-4">
+              <Text
                 style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                className="text-sm text-[#01A2FB] ml-1.5 uppercase"
+                className="text-[28px] text-[#070617] tracking-tight leading-8"
               >
-                pts
+                {monthlyRedeemed.toLocaleString()}
               </Text>
-            </View>
-
-            {portfolioINR > 0 ? (
-              <View className="bg-[#F0FDF4] border border-[#DCFCE7] px-3 py-1 rounded-xl items-end">
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-xs text-[#16A34A]"
-                >
-                  ≈ ₹{Math.round(portfolioINR).toLocaleString()}
-                </Text>
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                  className="text-[9px] text-[#65A30D]"
-                >
-                  Est. Rupee Value
-                </Text>
-              </View>
-            ) : null}
-          </View>
-
-          {/* Divider */}
-          <View className="h-[1px] bg-[#EAF2F6] mb-3.5" />
-
-          {/* 3-Column Sub Metrics */}
-          <View className="flex-row items-center justify-between space-x-2">
-            {/* Monthly Earned */}
-            <View className="flex-1 bg-[#F0FDF4] border border-[#DCFCE7] rounded-2xl p-2.5 items-center">
-              <View className="flex-row items-center mb-0.5">
-                <ArrowUpRight size={13} color="#16A34A" />
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-[13px] text-[#16A34A] ml-0.5"
-                >
-                  +{monthlyEarned.toLocaleString()}
-                </Text>
-              </View>
               <Text
-                style={{ fontFamily: "PlusJakartaSans-Medium" }}
-                className="text-[10px] text-[#15803D]"
+                style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                className="text-[13px] text-[#8E8E93] mt-1"
               >
-                Earned (30d)
-              </Text>
-            </View>
-
-            {/* Monthly Redeemed */}
-            <View className="flex-1 bg-[#FAF5FF] border border-[#F3E8FF] rounded-2xl p-2.5 items-center">
-              <View className="flex-row items-center mb-0.5">
-                <ArrowDownRight size={13} color="#9C4EBD" />
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-[13px] text-[#9C4EBD] ml-0.5"
-                >
-                  -{monthlyRedeemed.toLocaleString()}
-                </Text>
-              </View>
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Medium" }}
-                className="text-[10px] text-[#7E22CE]"
-              >
-                Redeemed (30d)
-              </Text>
-            </View>
-
-            {/* Expiring Soon */}
-            <View
-              className={`flex-1 rounded-2xl p-2.5 items-center border ${
-                expiringThisMonth > 0
-                  ? "bg-[#FFF5F5] border-[#FED7D7]"
-                  : "bg-[#F8FAFC] border-[#E2E8F0]"
-              }`}
-            >
-              <View className="flex-row items-center mb-0.5">
-                {expiringThisMonth > 0 ? (
-                  <AlertTriangle size={13} color="#FF4343" />
-                ) : (
-                  <CheckCircle2 size={13} color="#10B981" />
-                )}
-                <Text
-                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className={`text-[13px] ml-0.5 ${
-                    expiringThisMonth > 0 ? "text-[#FF4343]" : "text-[#10B981]"
-                  }`}
-                >
-                  {expiringThisMonth > 0
-                    ? expiringThisMonth.toLocaleString()
-                    : "0"}
-                </Text>
-              </View>
-              <Text
-                style={{ fontFamily: "PlusJakartaSans-Medium" }}
-                className={`text-[10px] ${
-                  expiringThisMonth > 0 ? "text-[#C53030]" : "text-[#64748B]"
-                }`}
-              >
-                {expiringThisMonth > 0 ? "Expiring (30d)" : "All Safe"}
+                Redeem this month
               </Text>
             </View>
           </View>
@@ -696,20 +576,12 @@ export default function OverviewScreen() {
 }
 
 const styles = StyleSheet.create({
-  topBgContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 220,
-    overflow: "hidden",
-  },
   heroCard: {
     shadowColor: "#01A2FB",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 14,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
   },
   card: {
     shadowColor: "#000000",

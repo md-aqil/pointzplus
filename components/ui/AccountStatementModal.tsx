@@ -51,8 +51,8 @@ export const AccountStatementModal: React.FC<AccountStatementModalProps> = ({
       transparent={true}
       onRequestClose={onClose}
     >
-      <View className="flex-1 justify-end bg-black/50">
-        <View className="bg-white rounded-t-3xl max-h-[85%] border-t border-border-light overflow-hidden shadow-2xl">
+      <View className="flex-1 justify-end items-center bg-black/50">
+        <View className="w-full max-w-[393px] bg-white rounded-t-3xl max-h-[85%] border-t border-border-light overflow-hidden shadow-2xl">
           {/* Header */}
           <View className="px-5 py-4 border-b border-border-light/60 flex-row items-center justify-between bg-[#F5FEFF]">
             <View className="flex-row items-center flex-1 mr-3">

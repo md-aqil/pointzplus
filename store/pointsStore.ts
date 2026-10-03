@@ -159,6 +159,12 @@ async function pollSyncJob(
       logger.log(`[pollSyncJob] Job ${jobId} status: ${job.status}, messages: ${job.messages_processed ?? 0}/${job.total_messages_found ?? 0}`);
     }
 
+    if (job.status === "cancelled") {
+      if (__DEV__) {
+        logger.log(`[pollSyncJob] Job ${jobId} was cancelled by user.`);
+      }
+      return job;
+    }
     if (job.status === "failed") {
       logger.error(`[pollSyncJob] Job ${jobId} failed:`, job.error_details);
       throw new Error(job.error_details || "Gmail sync failed. Please try again.");
@@ -245,6 +251,7 @@ interface PointsState {
 
   /** Removes the mailbox whose email_sync_accounts id is given. */
   disconnectEmail: (accountId: string) => Promise<void>;
+  cancelSyncJob: (jobId?: string) => Promise<boolean>;
   fetchAccountsFromBackend: (force?: boolean) => Promise<void>;
   fetchPortfolioFromBackend: (force?: boolean) => Promise<void>;
   fetchNotificationsFromBackend: (force?: boolean) => Promise<void>;
@@ -607,6 +614,24 @@ export const usePointsStore = create<PointsState>((set, get) => ({
         }
       });
 
+      if (job.status === "cancelled") {
+        const rows = await apiClient.getAccounts().catch(() => []);
+        const syncedAccounts = Array.isArray(rows) ? rows.map(mapBackendAccount) : [];
+        set({
+          accounts: syncedAccounts,
+          isSyncing: false,
+          isBackfillRunning: false,
+          activeJobDetails: null,
+          syncProgress: {
+            step: "Scan stopped by user",
+            percent: 0,
+            liveDetections: job.live_detections || [],
+            rejectedEmails: job.rejected_emails || [],
+          },
+        });
+        return syncedAccounts;
+      }
+
       handleProgress({ step: "Refreshing your portfolio...", percent: 90 });
       const previousBalances = new Map(
         get().accounts.map((a) => [a.programId, a.currentBalance])
@@ -676,6 +701,64 @@ export const usePointsStore = create<PointsState>((set, get) => ({
         (e) => e.id !== accountId && e.email !== accountId
       ),
     }));
+  },
+
+  cancelSyncJob: async (jobId?: string) => {
+    try {
+      const activeId = jobId || get().activeJobDetails?.id;
+
+      // Set transient 'cancelling' state so UI reflects stopping without losing job context prematurely
+      set((state) => ({
+        activeJobDetails: state.activeJobDetails
+          ? { ...state.activeJobDetails, status: "cancelling" }
+          : state.activeJobDetails,
+        syncProgress: {
+          ...state.syncProgress,
+          step: "Stopping scan...",
+        },
+      }));
+
+      let cancelledJob: SyncJob | null = null;
+      let success = false;
+      if (activeId) {
+        const res = await apiClient.cancelSyncJob(activeId);
+        success = res.success;
+        cancelledJob = res.job;
+      } else {
+        const res = await apiClient.cancelActiveSyncJob();
+        success = res.success;
+        cancelledJob = res.cancelledJobs?.[0] || null;
+      }
+
+      if (!success) {
+        // Cancellation failed or was rejected by backend (e.g. job already completed)
+        await get().checkActiveSyncStatus().catch(() => {});
+        return false;
+      }
+
+      set({
+        isSyncing: false,
+        isBackfillRunning: false,
+        activeJobDetails: cancelledJob
+          ? { ...cancelledJob, status: "cancelled" }
+          : null,
+        syncProgress: {
+          step: "Scan stopped by user",
+          percent: 0,
+          liveDetections: cancelledJob?.live_detections || [],
+          rejectedEmails: cancelledJob?.rejected_emails || [],
+        },
+      });
+      // Refresh accounts from backend so whatever was detected prior to cancellation is immediately reflected
+      await get().fetchAccountsFromBackend(true).catch(() => {});
+      await get().fetchParsedStatements(200).catch(() => {});
+      return true;
+    } catch (err: any) {
+      logger.warn("[pointsStore] cancelSyncJob error:", err?.message);
+      // Re-verify actual state from server if cancellation failed
+      await get().checkActiveSyncStatus().catch(() => {});
+      return false;
+    }
   },
 
   fetchParsedStatements: async (limit = 200) => {

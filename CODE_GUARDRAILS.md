@@ -158,4 +158,24 @@ the #1 defect in this repo's history.
   `expo-blur`/`expo-sms` deps, `getExpiringAlerts` duplicate endpoint.
   Don't re-add equivalents without a design review.
 
-<!--APPEND-->
+## 7. Defensive programming & anti-regression rules
+
+### ❌ Zero Fallback Bug (`||` vs `??`)
+- **NEVER** use logical OR `||` for numeric fallback counters (e.g. `Math.max(0, processed - parsed) || list.length`). Because `0` is falsy in JavaScript, a valid `0` will incorrectly fall back and inflate counts.
+- **ALWAYS** use nullish coalescing (`??`) or explicit `value != null` checks for numbers.
+
+### 🛡️ Store Action Integrity & Honest Booleans
+- **NEVER** return `true` blindly from async store actions (e.g., `cancelSyncJob`) without inspecting `res.success` from the backend response.
+- **NEVER** force optimistic terminal states (like `status: "cancelled"`) if the server reported failure (`success: false`).
+
+### 📦 Asset Require Paths & Metro Hygiene
+- **NEVER** `require()` asset paths that contain whitespace or un-normalized directory names (e.g., `"../../assets/brand/Logo Files/..."`).
+- **ALWAYS** normalize image assets into clean, dedicated directories (e.g. `assets/logos/logo-*.png`) so Metro bundler works deterministically across macOS, Linux, Android, and CI.
+
+### 🔐 Token Storage Security (Native vs Web)
+- **ALWAYS** route auth token reads/writes through `lib/storage.ts` which guarantees OS-level Keychain/Keystore via `expo-secure-store` on iOS/Android, and safe fallback on Web.
+- **ALWAYS** validate storage keys against `^[A-Za-z0-9._-]+$` to avoid native runtime crashes.
+
+### 🔄 Shared UX Hooks over Duplicated Handlers
+- **NEVER** copy-paste identical multi-step action sequences (alert confirmation + haptics + store call + stopping state) across multiple screens. Extract them into reusable custom hooks (e.g. `hooks/useStopMailboxScan.ts`).
+

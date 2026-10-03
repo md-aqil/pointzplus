@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: Frontend — typecheck & tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: TypeScript check
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm test -- --passWithNoTests
+
+  server:
+    name: Server — tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+        env:
+          JWT_SECRET: ci-test-secret-not-real
+
+  guardrails:
+    name: Guardrails — dead deps & mock data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: No mock user ids in shipped code
+        run: |
+          if grep -rn "user-1" app components hooks lib store services constants types --include="*.ts" --include="*.tsx"; then
+            echo "::error::Mock demo user id found in shipped code (guardrail §3)"
+            exit 1
+          fi
+      - name: No raw hex colors added outside tokens
+        run: |
+          HITS=$(grep -rEn "#[0-9a-fA-F]{6}" app components --include="*.tsx" --include="*.ts" | grep -v constants/ | wc -l || true)
+          echo "raw hex occurrences (informational): $HITS"

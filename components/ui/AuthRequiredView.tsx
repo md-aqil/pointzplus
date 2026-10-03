@@ -65,7 +65,7 @@ export const AuthRequiredView: React.FC<AuthRequiredViewProps> = ({
           <View style={{ width: 40 }} />
         )}
         <View style={styles.logoBadge}>
-          <PointzPlusLogo width={110} height={40} />
+          <PointzPlusLogo width={110} height={55} />
         </View>
         <View style={{ width: 40 }} />
       </View>
