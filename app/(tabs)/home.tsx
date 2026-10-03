@@ -20,6 +20,8 @@ import {
 import * as Haptics from "expo-haptics";
 import { DashboardTopBg } from "../../components/ui/DashboardTopBg";
 import { AuthRequiredView } from "../../components/ui/AuthRequiredView";
+import { BrandPointCard } from "../../components/cards/BrandPointCard";
+import { LiveDiscoveryCard } from "../../components/cards/LiveDiscoveryCard";
 import { usePoints } from "../../hooks/usePoints";
 import { useAuth } from "../../hooks/useAuth";
 import { formatNameFromEmail } from "../../store/authStore";
@@ -188,7 +190,7 @@ export default function HomeScreen() {
     <View className="flex-1 bg-[#F8FAFC]">
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 120 }}
+        contentContainerStyle={{ paddingBottom: 28 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing || isSyncing}
@@ -423,49 +425,11 @@ export default function HomeScreen() {
               {/* Expiry Cards List */}
               <View className="mb-6">
                 {soonExpiring.slice(0, 3).map((acc) => (
-                  <TouchableOpacity
+                  <BrandPointCard
                     key={acc.id}
+                    account={acc}
                     onPress={() => router.push(`/category/${acc.program.category}`)}
-                    activeOpacity={0.85}
-                    className="bg-white rounded-2xl p-4 mb-3 border border-slate-200/60 shadow-sm flex-row items-center justify-between"
-                  >
-                    <View className="flex-row items-center flex-1 mr-2">
-                      <View
-                        style={{ backgroundColor: `${acc.program.accentColor}22` }}
-                        className="w-11 h-11 rounded-xl items-center justify-center mr-3 border border-slate-100"
-                      >
-                        <Text className="text-lg">{acc.program.logoInitial}</Text>
-                      </View>
-                      <View className="flex-1">
-                        <Text
-                          style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                          className="text-[15px] text-slate-900"
-                        >
-                          {acc.program.name}
-                        </Text>
-                        <Text
-                          style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                          className="text-[12.5px] text-slate-500 mt-0.5"
-                        >
-                          {acc.expiringPoints.toLocaleString()} pts expire{" "}
-                          {acc.expiryDate && !isNaN(new Date(acc.expiryDate).getTime())
-                            ? new Date(acc.expiryDate).toLocaleDateString("en-GB", {
-                                day: "numeric",
-                                month: "short",
-                                year: "numeric",
-                              })
-                            : "soon"}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <Text
-                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                      className="text-[17px] text-slate-900"
-                    >
-                      {acc.currentBalance.toLocaleString()}
-                    </Text>
-                  </TouchableOpacity>
+                  />
                 ))}
               </View>
             </>
@@ -512,85 +476,45 @@ export default function HomeScreen() {
               )}
 
               {/* Live Discovery Stream (Latest Points Found) */}
-              <View className="flex-row items-center justify-between mb-4">
-                <View className="flex-row items-center">
-                  <Text
-                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                    className="text-[18px] text-slate-900 mr-2"
-                  >
-                    Live Discovery Stream
-                  </Text>
-                  <View className="bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-full flex-row items-center">
-                    <View className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5" />
-                    <Text
-                      style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                      className="text-[10.5px] text-emerald-700"
-                    >
-                      LIVE
-                    </Text>
-                  </View>
-                </View>
+              <View className="flex-row items-center justify-between mb-3">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-[12px] text-[#7E8B9B] uppercase tracking-wider"
+                >
+                  LIVE DISCOVERY STREAM
+                </Text>
 
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     router.push("/email-sync");
                   }}
-                  className="flex-row items-center"
+                  activeOpacity={0.8}
+                  className="flex-row items-center bg-[#E6F8FF] border border-[#BAE6FD] px-2.5 py-1 rounded-xl"
                 >
+                  <Sparkles size={12} color="#01A2FB" className="mr-1" />
                   <Text
-                    style={{ fontFamily: "PlusJakartaSans-SemiBold" }}
-                    className="text-sm text-[#00A3FF] mr-1"
+                    style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                    className="text-[11px] text-[#01A2FB]"
                   >
                     Auto-Sync
                   </Text>
-                  <Sparkles size={14} color="#00A3FF" />
                 </TouchableOpacity>
               </View>
 
               {/* Latest Discovered Cards */}
-              <View className="mb-6">
+              <View className="mb-5">
                 {latestDiscovered.length > 0 ? (
                   latestDiscovered.map((acc) => (
-                    <TouchableOpacity
+                    <LiveDiscoveryCard
                       key={acc.id}
+                      programName={acc.program.name}
+                      category={acc.program.category}
+                      logoInitial={acc.program.logoInitial}
+                      accountNumber={acc.accountNumberMasked}
+                      balance={acc.currentBalance}
                       onPress={() => router.push(`/category/${acc.program.category}`)}
-                      activeOpacity={0.8}
-                      className="bg-white rounded-[22px] px-4 py-3 mb-2.5 border border-slate-100 flex-row items-center justify-between"
-                    >
-                      <View className="flex-row items-center flex-1 mr-2">
-                        <View
-                          style={{ backgroundColor: `${acc.program.accentColor}12` }}
-                          className="w-11 h-11 rounded-full items-center justify-center mr-3 border border-slate-100"
-                        >
-                          <Text className="text-lg">{acc.program.logoInitial || "🛍️"}</Text>
-                        </View>
-                        <View className="flex-1">
-                          <Text
-                            style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                            className="text-[14.5px] text-slate-900"
-                            numberOfLines={1}
-                          >
-                            {acc.program.name}
-                          </Text>
-                          <Text
-                            style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                            className="text-[11.5px] text-slate-400 mt-0.5"
-                          >
-                            {acc.accountNumberMasked || "MEMBER-***"} · Discovered
-                          </Text>
-                        </View>
-                      </View>
-
-                      <View className="bg-[#E8FAF3] border border-[#D1F7E5] px-3.5 py-1.5 rounded-full items-center justify-center">
-                        <Text
-                          style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                          className="text-[13.5px] text-[#00A86B]"
-                        >
-                          +{acc.currentBalance.toLocaleString()}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
+                    />
                   ))
                 ) : (
                   <TouchableOpacity
@@ -598,31 +522,38 @@ export default function HomeScreen() {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                       router.push("/email-sync");
                     }}
-                    activeOpacity={0.9}
-                    className="bg-sky-50/80 rounded-2xl p-5 border border-sky-200/60 shadow-sm flex-row items-center justify-between"
+                    activeOpacity={0.88}
+                    className="bg-white rounded-2xl p-3.5 border border-[#DCF0FA] shadow-sm flex-row items-center justify-between"
                   >
                     <View className="flex-row items-center flex-1 mr-3">
-                      <View className="w-12 h-12 rounded-2xl bg-white shadow-sm border border-sky-100 items-center justify-center mr-3.5">
-                        <Sparkles size={22} color="#01A2FB" />
+                      <View className="w-10 h-10 rounded-xl bg-[#E6F8FF] border border-[#BAE6FD] items-center justify-center mr-3">
+                        <Sparkles size={18} color="#01A2FB" />
                       </View>
                       <View className="flex-1">
                         <Text
                           style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                          className="text-[15px] text-slate-900"
+                          className="text-[13.5px] text-slate-900"
                         >
-                          Auto-Discover Your Points
+                          Auto-Discover Points
                         </Text>
                         <Text
                           style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                          className="text-[12.5px] text-slate-600 mt-0.5 leading-4"
+                          className="text-[11.5px] text-slate-500 mt-0.5"
+                          numberOfLines={1}
                         >
-                          Sync Gmail to extract all your loyalty points & miles live.
+                          Sync Gmail to extract your rewards live
                         </Text>
                       </View>
                     </View>
 
-                    <View className="w-9 h-9 rounded-full bg-[#01A2FB] items-center justify-center">
-                      <ArrowRight size={18} color="#FFFFFF" strokeWidth={2.4} />
+                    <View className="bg-[#01A2FB] px-3 py-1.5 rounded-xl flex-row items-center">
+                      <Text
+                        style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                        className="text-xs text-white mr-1"
+                      >
+                        Sync
+                      </Text>
+                      <ArrowRight size={12} color="#FFFFFF" />
                     </View>
                   </TouchableOpacity>
                 )}

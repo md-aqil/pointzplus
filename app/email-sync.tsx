@@ -35,6 +35,7 @@ import { apiClient } from "../lib/apiClient";
 import { logger } from "../lib/logger";
 import { MailboxCard } from "../components/ui/MailboxCard";
 import { AuthRequiredView } from "../components/ui/AuthRequiredView";
+import { LiveDiscoveryCard } from "../components/cards/LiveDiscoveryCard";
 
 export default function EmailSyncScreen() {
   const router = useRouter();
@@ -305,52 +306,18 @@ export default function EmailSyncScreen() {
               <View className="mt-1">
                 <Text
                   style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                  className="text-[11px] text-slate-400 uppercase tracking-wider mb-2 ml-1"
+                  className="text-[12px] text-[#7E8B9B] uppercase tracking-wider mb-2.5 ml-1"
                 >
-                  Live Discovery Stream
+                  LIVE DISCOVERY STREAM
                 </Text>
                 {syncProgress.liveDetections.slice(-5).reverse().map((item, idx) => (
-                  <View
+                  <LiveDiscoveryCard
                     key={`${item.programName}-${idx}`}
-                    className="bg-white border border-slate-100 rounded-[22px] px-4 py-3 flex-row items-center justify-between mb-2.5"
-                  >
-                    <View className="flex-row items-center flex-1 mr-2">
-                      <View className="w-11 h-11 rounded-full bg-slate-50 items-center justify-center mr-3 border border-slate-100">
-                        <Text className="text-lg">
-                          {item.category === "airlines"
-                            ? "✈️"
-                            : item.category === "banking"
-                            ? "💳"
-                            : item.category === "hotels"
-                            ? "🏨"
-                            : "🛍️"}
-                        </Text>
-                      </View>
-                      <View className="flex-1">
-                        <Text
-                          style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                          className="text-[14.5px] text-slate-900"
-                          numberOfLines={1}
-                        >
-                          {item.programName}
-                        </Text>
-                        <Text
-                          style={{ fontFamily: "PlusJakartaSans-Regular" }}
-                          className="text-[11.5px] text-slate-400 mt-0.5"
-                        >
-                          {item.accountNumber || "MEMBER-***"} · Discovered
-                        </Text>
-                      </View>
-                    </View>
-                    <View className="bg-[#E8FAF3] border border-[#D1F7E5] px-3.5 py-1.5 rounded-full items-center justify-center">
-                      <Text
-                        style={{ fontFamily: "PlusJakartaSans-Bold" }}
-                        className="text-[13.5px] text-[#00A86B]"
-                      >
-                        +{Number(item.balance).toLocaleString()}
-                      </Text>
-                    </View>
-                  </View>
+                    programName={item.programName}
+                    category={item.category}
+                    accountNumber={item.accountNumber}
+                    balance={item.balance}
+                  />
                 ))}
               </View>
             )}

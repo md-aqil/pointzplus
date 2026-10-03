@@ -180,7 +180,7 @@ export default function OverviewScreen() {
       </View>
 
       {/* App Header */}
-      <View className="px-5 pt-3 pb-4 flex-row items-center justify-between">
+      <View className="px-4 pt-3 pb-3 flex-row items-center justify-between">
         <View>
           <View className="flex-row items-center space-x-1.5">
             <Text
@@ -219,8 +219,8 @@ export default function OverviewScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        className="px-4 pt-1"
+        contentContainerStyle={{ paddingBottom: 32 }}
+        className="px-3.5 pt-1"
         refreshControl={
           <RefreshControl
             refreshing={refreshing || isSyncing}
@@ -231,7 +231,7 @@ export default function OverviewScreen() {
         }
       >
         {/* ─── Hero Portfolio Metric Card ─────────────────────────── */}
-        <View style={styles.heroCard} className="w-full bg-white rounded-3xl p-5 mb-4 border border-[#DCF0FA]">
+        <View style={styles.heroCard} className="w-full bg-white rounded-3xl p-4 mb-3.5 border border-[#DCF0FA]">
           {/* Top Label & Sparkle */}
           <View className="flex-row items-center justify-between mb-1.5">
             <View className="flex-row items-center space-x-1.5">
@@ -369,7 +369,7 @@ export default function OverviewScreen() {
         </View>
 
         {/* ─── Category Distribution Card ─────────────────────────── */}
-        <View style={styles.card} className="w-full bg-white rounded-3xl p-5 mb-4 border border-[#E0F3FA]">
+        <View style={styles.card} className="w-full bg-white rounded-3xl p-4 mb-3.5 border border-[#E0F3FA]">
           <View className="flex-row items-center justify-between mb-1">
             <View>
               <Text
@@ -441,7 +441,7 @@ export default function OverviewScreen() {
 
           {/* Filter Pills */}
           {activeCategories.length > 1 && (
-            <View className="flex-row items-center space-x-2 mb-3 mt-1">
+            <View className="flex-row items-center space-x-1.5 mb-3 mt-1">
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -533,7 +533,7 @@ export default function OverviewScreen() {
                       );
                     }}
                     activeOpacity={0.7}
-                    className={`py-3.5 px-2.5 rounded-2xl transition-all ${
+                    className={`py-3 px-1.5 rounded-2xl transition-all ${
                       isSelected ? "bg-[#F0FAFE] border border-[#BAE6FD]" : ""
                     }`}
                   >

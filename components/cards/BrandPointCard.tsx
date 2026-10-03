@@ -1,8 +1,8 @@
-// components/cards/BrandPointCard.tsx – Works with LinkedAccount from pointsStore
 import React, { memo } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import * as Haptics from "expo-haptics";
 import { LinkedAccount } from "../../types/loyalty";
+import { getCategoryIconComponent } from "../../constants/popularPrograms";
 
 interface BrandPointCardProps {
   account: LinkedAccount;
@@ -28,6 +28,8 @@ export const BrandPointCard: React.FC<BrandPointCardProps> = memo(({
       ? `Extracted from ${account.sourceSender.split("@")[1] || account.sourceSender}`
       : "Synced via Gmail";
 
+  const CategoryIcon = getCategoryIconComponent(account.program.category);
+
   return (
     <TouchableOpacity
       onPress={handlePress}
@@ -40,7 +42,11 @@ export const BrandPointCard: React.FC<BrandPointCardProps> = memo(({
           style={{ backgroundColor: `${account.program.accentColor || "#01A2FB"}15` }}
           className="w-11 h-11 rounded-full items-center justify-center mr-3 border border-[#E6F6FF]"
         >
-          <Text className="text-base">{account.program.logoInitial || "✈️"}</Text>
+          {account.program.logoInitial ? (
+            <Text className="text-base">{account.program.logoInitial}</Text>
+          ) : (
+            <CategoryIcon size={18} color={account.program.accentColor || "#01A2FB"} />
+          )}
         </View>
 
         {/* Brand Details */}
