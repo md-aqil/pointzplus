@@ -175,23 +175,29 @@ export const emailSyncController = {
     const statements = await EmailSyncRepo.listEmailStatements(req.userId, limit);
 
     // Safeguard response: redact any PII / account numbers and omit or sanitize raw_text_preview
-    const sanitized = statements.map((s) => ({
-      id: s.id,
-      from_email: redactSensitiveText(s.from_email || '').slice(0, 100),
-      subject: redactSensitiveText(s.subject || '(No Subject)').slice(0, 150),
-      received_at: s.received_at,
-      extracted_balance: Number(s.extracted_balance) || 0,
-      extracted_account_number: s.extracted_account_number,
-      extracted_expiry_date: s.extracted_expiry_date,
-      parser_confidence: s.parser_confidence,
-      raw_text_preview: includePreview && s.raw_text_preview ? redactSensitiveText(s.raw_text_preview).slice(0, 120) : null,
-      extraction_source: s.extraction_source,
-      created_at: s.created_at,
-      program_name: s.program_name,
-      category: s.category,
-      logo_initial: s.logo_initial,
-      accent_color: s.accent_color,
-    }));
+    const sanitized = statements.map((s) => {
+      const parsedConfidence = s.parser_confidence != null ? Number(s.parser_confidence) : null;
+      return {
+        id: s.id,
+        from_email: redactSensitiveText(s.from_email || '').slice(0, 100),
+        subject: redactSensitiveText(s.subject || '(No Subject)').slice(0, 150),
+        received_at: s.received_at,
+        extracted_balance: Number(s.extracted_balance) || 0,
+        extracted_account_number: s.extracted_account_number,
+        extracted_expiry_date: s.extracted_expiry_date,
+        // pg returns DECIMAL as string; normalize to number|null so the client
+        // `parser_confidence?: number | null` contract holds (null = unknown, badge hidden).
+        // Guard against non-numeric strings or NaN so invalid values cleanly yield null.
+        parser_confidence: Number.isFinite(parsedConfidence) ? parsedConfidence : null,
+        raw_text_preview: includePreview && s.raw_text_preview ? redactSensitiveText(s.raw_text_preview).slice(0, 120) : null,
+        extraction_source: s.extraction_source,
+        created_at: s.created_at,
+        program_name: s.program_name,
+        category: s.category,
+        logo_initial: s.logo_initial,
+        accent_color: s.accent_color,
+      };
+    });
 
     res.json(sanitized);
   }),

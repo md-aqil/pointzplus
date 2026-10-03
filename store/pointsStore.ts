@@ -81,6 +81,14 @@ const lastFetchTimestamps = {
 };
 const RESOURCE_TTL_MS = 30_000;
 
+// Active-job poll is cheap but must stay idempotent on tab mounts: `refreshAll`
+// without `force` is called by every tab mount effect, so gate the
+// `/email-sync/active-job` fetch behind a short TTL when idle. If a backfill is
+// running (`isBackfillRunning === true`) or `force=true` (pull-to-refresh / retry),
+// always check immediately so job completion/start is detected promptly.
+let lastActiveJobCheck = 0;
+const ACTIVE_JOB_TTL_MS = 5_000;
+
 export function isResourceFresh(
   resource: "accounts" | "notifications" | "portfolio",
   ttl = RESOURCE_TTL_MS
@@ -685,8 +693,19 @@ export const usePointsStore = create<PointsState>((set, get) => ({
   },
 
   refreshAll: async (force = false) => {
-    // Always refresh active background sync job status
-    const activeSyncPromise = get().checkActiveSyncStatus().catch(() => {});
+    // Non-critical poll: never let it reject refreshAll (checkActiveSyncStatus
+    // already swallows errors; this .catch is belt-and-braces).
+    // Always poll when forced or when a backfill is actively running so completion is detected promptly.
+    const isRunning = get().isBackfillRunning;
+    const shouldCheckActiveJob = force || isRunning || Date.now() - lastActiveJobCheck > ACTIVE_JOB_TTL_MS;
+    const activeSyncPromise = shouldCheckActiveJob
+      ? get()
+          .checkActiveSyncStatus()
+          .then(() => {
+            lastActiveJobCheck = Date.now();
+          })
+          .catch(() => {})
+      : Promise.resolve();
 
     const needsAccounts = force || !isResourceFresh("accounts");
     const needsNotifications = force || !isResourceFresh("notifications");
@@ -700,7 +719,7 @@ export const usePointsStore = create<PointsState>((set, get) => ({
 
     set({ isSyncing: true });
     try {
-      const tasks: Promise<any>[] = [activeSyncPromise];
+      const tasks: Promise<void>[] = [activeSyncPromise];
       if (needsAccounts) tasks.push(get().fetchAccountsFromBackend(force));
       if (needsNotifications) tasks.push(get().fetchNotificationsFromBackend(force));
       if (needsPortfolio) tasks.push(get().fetchPortfolioFromBackend(force));
@@ -715,6 +734,7 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     lastFetchTimestamps.accounts = 0;
     lastFetchTimestamps.notifications = 0;
     lastFetchTimestamps.portfolio = 0;
+    lastActiveJobCheck = 0;
     set({
       accounts: [],
       emailAccounts: [],

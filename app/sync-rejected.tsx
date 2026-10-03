@@ -774,7 +774,7 @@ export default function SyncRejectedScreen() {
                             </Text>
                           </View>
 
-                          {item.parser_confidence != null ? (
+                          {item.parser_confidence != null && Number.isFinite(item.parser_confidence) ? (
                             <View className="bg-emerald-50 px-2 py-0.5 rounded-md mb-1">
                               <Text
                                 style={{ fontFamily: "PlusJakartaSans-Bold" }}

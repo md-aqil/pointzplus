@@ -538,11 +538,17 @@ export const EmailSyncRepo = {
     ).then((r) => r.rows[0] || null);
   },
 
+  /**
+   * Fetch recent parsed email statements for a user.
+   * `es.parser_confidence` is returned as-is (nullable `DECIMAL(3, 2)`).
+   * Legacy or unrated rows return `null` so the UI hides the match badge rather
+   * than presenting a fabricated confidence score (honesty / no mock data guardrail).
+   */
   listEmailStatements(userId, limit = 200) {
     return query(
       `SELECT es.id, es.from_email, es.subject, es.received_at, es.extracted_balance,
               es.extracted_account_number, es.extracted_expiry_date,
-              COALESCE(es.parser_confidence, 0.95) as parser_confidence,
+              es.parser_confidence,
               es.raw_text_preview, es.extraction_source, es.created_at,
               lp.name as program_name, lp.category, lp.logo_initial, lp.accent_color
        FROM email_statements es

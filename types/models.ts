@@ -48,6 +48,7 @@ export interface RejectedEmail {
 export interface SyncJob {
   id: string;
   status: SyncJobStatus;
+  provider?: string;
   total_messages_found: number | null;
   messages_processed: number | null;
   programs_updated: number | null;
