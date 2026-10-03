@@ -32,12 +32,14 @@ import { usePoints } from "../hooks/usePoints";
 import { usePointsStore } from "../store/pointsStore";
 import { useAuth } from "../hooks/useAuth";
 import { apiClient } from "../lib/apiClient";
+import { logger } from "../lib/logger";
 import { MailboxCard } from "../components/ui/MailboxCard";
+import { AuthRequiredView } from "../components/ui/AuthRequiredView";
 
 export default function EmailSyncScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ connected?: string }>();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const {
     emailAccounts,
     syncEmail,
@@ -59,6 +61,7 @@ export default function EmailSyncScreen() {
 
   // Check background scan job status on mount & adaptively poll while active
   useEffect(() => {
+    if (!isAuthenticated) return;
     checkActiveSyncStatus();
 
     if (!isBackfillRunning && !isSyncing) return;
@@ -67,7 +70,17 @@ export default function EmailSyncScreen() {
       checkActiveSyncStatus();
     }, 4000);
     return () => clearInterval(interval);
-  }, [isBackfillRunning, isSyncing, checkActiveSyncStatus]);
+  }, [isAuthenticated, isBackfillRunning, isSyncing, checkActiveSyncStatus]);
+
+  if (!isAuthenticated) {
+    return (
+      <AuthRequiredView
+        title="Email Auto-Sync"
+        subtitle="Sign in to connect your Gmail mailbox and automatically scan loyalty statements."
+        showBack={true}
+      />
+    );
+  }
 
   // Trigger micro-haptics when new loyalty programs are discovered in real time
   useEffect(() => {
@@ -106,7 +119,7 @@ export default function EmailSyncScreen() {
     for (const account of gmailAccounts) {
       if (!account.lastSyncAt && !autoScannedAccountsRef.current.has(account.id)) {
         autoScannedAccountsRef.current.add(account.id);
-        console.log("[EmailSync] Auto-starting scan for newly connected mailbox:", account.email);
+        logger.log("[EmailSync] Auto-starting scan for newly connected mailbox:", account.email);
         handleStartSync(account.email);
         break;
       }
@@ -138,15 +151,15 @@ export default function EmailSyncScreen() {
   const handleStartSync = async (email: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSyncError(null);
-    console.log("[EmailSync] Starting Gmail scan for:", email);
+    logger.log("[EmailSync] Starting Gmail scan for:", email);
     try {
       const results = await syncEmail("gmail", email);
-      console.log("[EmailSync] Scan finished successfully with results count:", results.length);
+      logger.log("[EmailSync] Scan finished successfully with results count:", results.length);
       setSyncedCount(results.length);
       setSyncSuccessModal(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
-      console.error("[EmailSync] Scan failed:", e);
+      logger.error("[EmailSync] Scan failed:", e);
       const errMsg = e?.message || "Failed to extract data from Gmail. Please reconnect your account and try again.";
       setSyncError(errMsg);
     }

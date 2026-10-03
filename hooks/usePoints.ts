@@ -1,14 +1,14 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   usePointsStore,
   computeDashboardSummary,
   computeCategorySummaries,
   computeExpiringAccounts,
 } from "../store/pointsStore";
-import { useAuthStore } from "../store/authStore";
+import { useAuth } from "./useAuth";
 
 export function usePoints() {
-  const user = useAuthStore((state) => state.user);
+  const { user, isAuthenticated } = useAuth();
   const accounts = usePointsStore((state) => state.accounts);
   const transactions = usePointsStore((state) => state.transactions);
   const monthlyFlows = usePointsStore((state) => state.monthlyFlows);
@@ -24,11 +24,21 @@ export function usePoints() {
   const syncEmail = usePointsStore((state) => state.syncEmail);
   const deleteAccount = usePointsStore((state) => state.deleteAccount);
   const disconnectEmail = usePointsStore((state) => state.disconnectEmail);
-  const refreshAll = usePointsStore((state) => state.refreshAll);
+  const rawRefreshAll = usePointsStore((state) => state.refreshAll);
+
+  const refreshAll = useCallback(
+    async (force = false): Promise<boolean> => {
+      if (!isAuthenticated) return false;
+      await rawRefreshAll(force);
+      return true;
+    },
+    [isAuthenticated, rawRefreshAll]
+  );
 
   const notifications = usePointsStore((state) => state.notifications);
   const fetchNotificationsFromBackend = usePointsStore((state) => state.fetchNotificationsFromBackend);
   const acknowledgeNotification = usePointsStore((state) => state.acknowledgeNotification);
+  const acknowledgeAllNotifications = usePointsStore((state) => state.acknowledgeAllNotifications);
 
   // Pure memoized derivations: calculated directly from input states without store closure ambiguity
   const summary = useMemo(
@@ -57,6 +67,7 @@ export function usePoints() {
     notifications,
     fetchNotificationsFromBackend,
     acknowledgeNotification,
+    acknowledgeAllNotifications,
     categories: categorySummaries,
     expiringAccounts,
 

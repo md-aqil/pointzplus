@@ -14,13 +14,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { TrendingUp, Star, Gift } from "lucide-react-native";
 import { PointzPlusLogo } from "../components/ui/PointzPlusLogo";
-import { useAuthStore } from "../store/authStore";
+import { useAuth } from "../hooks/useAuth";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 export default function OnboardingScreen() {
   const router = useRouter();
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const { isAuthenticated } = useAuth();
 
   useEffect(() => {
     if (isAuthenticated) {

@@ -4,6 +4,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { apiClient } from '../lib/apiClient';
+import { logger } from '../lib/logger';
 
 // Local dedup ledger so we don't re-notify for the same account+tier on every app open.
 // SecureStore values are size-capped (notably ~2KB on Android), so the ledger is
@@ -91,7 +92,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 
   if (finalStatus !== 'granted') {
-    console.log('Push notification permission not granted');
+    logger.log('Push notification permission not granted');
     return null;
   }
 
@@ -131,7 +132,7 @@ async function savePushToken(token: string) {
   try {
     await apiClient.registerPushToken(token);
   } catch (error) {
-    console.error('Error saving push token:', error);
+    logger.error('Error saving push token:', error);
   }
 }
 
@@ -218,7 +219,7 @@ export async function notifyPointsEarned(
       'earning-alerts'
     );
   } catch (error) {
-    console.error('Error sending earning notification:', error);
+    logger.error('Error sending earning notification:', error);
   }
 }
 
@@ -245,7 +246,7 @@ export async function notifySpecialOffer(
       'offers'
     );
   } catch (error) {
-    console.error('Error sending offer notification:', error);
+    logger.error('Error sending offer notification:', error);
   }
 }
 
@@ -297,7 +298,7 @@ export async function checkAndTriggerExpiryAlerts() {
       await markAlertSent(dedupKey);
     }
   } catch (error) {
-    console.error('Error checking expiry alerts:', error);
+    logger.error('Error checking expiry alerts:', error);
   }
 }
 

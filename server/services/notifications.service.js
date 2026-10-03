@@ -53,6 +53,13 @@ export const notificationsService = {
     });
   },
 
+  acknowledgeAll(userId) {
+    return NotificationsRepo.acknowledgeAll(userId).then((acknowledged) => ({
+      success: true,
+      acknowledged,
+    }));
+  },
+
   /**
    * Persist a locally-fired alert so /notifications/history is complete even
    * when the server cron has not run yet. Ownership is enforced and repeats of

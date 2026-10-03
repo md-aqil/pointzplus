@@ -18,25 +18,16 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   AlertTriangle,
-  Plane,
-  Building2,
-  CreditCard,
-  ShoppingBag,
-  Utensils,
-  Fuel,
-  Tv,
-  Heart,
-  Radio,
-  ShoppingCart,
-  Compass,
-  Layers,
   Zap,
   CheckCircle2,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { DashboardTopBg } from "../../components/ui/DashboardTopBg";
 import { PointsDonutChart, ChartSegment } from "../../components/charts/PointsDonutChart";
+import { AuthRequiredView } from "../../components/ui/AuthRequiredView";
 import { usePoints } from "../../hooks/usePoints";
+import { useAuth } from "../../hooks/useAuth";
+import { getCategoryIconComponent } from "../../constants/popularPrograms";
 
 interface CategoryMeta {
   color: string;
@@ -45,103 +36,55 @@ interface CategoryMeta {
   icon: React.ReactNode;
 }
 
-const getCategoryMeta = (catId: string): CategoryMeta => {
+/** Screen-local palette (Penpot variant) for the overview legend/donut segments. */
+const getCategoryPalette = (catId: string): Omit<CategoryMeta, "icon"> => {
   switch (catId) {
     case "airlines":
-      return {
-        color: "#9C4EBD",
-        bg: "#FAF5FF",
-        iconColor: "#9C4EBD",
-        icon: <Plane size={16} color="#9C4EBD" />,
-      };
+      return { color: "#9C4EBD", bg: "#FAF5FF", iconColor: "#9C4EBD" };
     case "banking":
-      return {
-        color: "#00A3FF",
-        bg: "#E6F6FF",
-        iconColor: "#00A3FF",
-        icon: <CreditCard size={16} color="#00A3FF" />,
-      };
+      return { color: "#00A3FF", bg: "#E6F6FF", iconColor: "#00A3FF" };
     case "shopping":
     case "retail":
-      return {
-        color: "#02EFF4",
-        bg: "#E6FFFF",
-        iconColor: "#01A2FB",
-        icon: <ShoppingBag size={16} color="#01A2FB" />,
-      };
+      return { color: "#02EFF4", bg: "#E6FFFF", iconColor: "#01A2FB" };
     case "hotels":
-      return {
-        color: "#F59E0B",
-        bg: "#FFFBEB",
-        iconColor: "#D97706",
-        icon: <Building2 size={16} color="#D97706" />,
-      };
+      return { color: "#F59E0B", bg: "#FFFBEB", iconColor: "#D97706" };
     case "dining":
     case "food_delivery":
-      return {
-        color: "#EF4444",
-        bg: "#FFF1F2",
-        iconColor: "#DC2626",
-        icon: <Utensils size={16} color="#DC2626" />,
-      };
+      return { color: "#EF4444", bg: "#FFF1F2", iconColor: "#DC2626" };
     case "fuel":
-      return {
-        color: "#F97316",
-        bg: "#FFF7ED",
-        iconColor: "#EA580C",
-        icon: <Fuel size={16} color="#EA580C" />,
-      };
+      return { color: "#F97316", bg: "#FFF7ED", iconColor: "#EA580C" };
     case "entertainment":
-      return {
-        color: "#EC4899",
-        bg: "#FDF2F8",
-        iconColor: "#DB2777",
-        icon: <Tv size={16} color="#DB2777" />,
-      };
+      return { color: "#EC4899", bg: "#FDF2F8", iconColor: "#DB2777" };
     case "health":
     case "wellness":
-      return {
-        color: "#8B5CF6",
-        bg: "#F5F3FF",
-        iconColor: "#7C3AED",
-        icon: <Heart size={16} color="#7C3AED" />,
-      };
+      return { color: "#8B5CF6", bg: "#F5F3FF", iconColor: "#7C3AED" };
     case "telecom":
-      return {
-        color: "#10B981",
-        bg: "#ECFDF5",
-        iconColor: "#059669",
-        icon: <Radio size={16} color="#059669" />,
-      };
+      return { color: "#10B981", bg: "#ECFDF5", iconColor: "#059669" };
     case "groceries":
     case "supermarket":
-      return {
-        color: "#10B981",
-        bg: "#ECFDF5",
-        iconColor: "#059669",
-        icon: <ShoppingCart size={16} color="#059669" />,
-      };
+      return { color: "#10B981", bg: "#ECFDF5", iconColor: "#059669" };
     case "travel":
-      return {
-        color: "#3B82F6",
-        bg: "#EFF6FF",
-        iconColor: "#2563EB",
-        icon: <Compass size={16} color="#2563EB" />,
-      };
+      return { color: "#3B82F6", bg: "#EFF6FF", iconColor: "#2563EB" };
     default:
-      return {
-        color: "#9C4EBD",
-        bg: "#FAF5FF",
-        iconColor: "#9C4EBD",
-        icon: <Layers size={16} color="#9C4EBD" />,
-      };
+      return { color: "#9C4EBD", bg: "#FAF5FF", iconColor: "#9C4EBD" };
   }
+};
+
+/**
+ * Meta = screen palette + icon from the ONE shared icon map
+ * (guardrails §3 — no screen-local icon switch).
+ */
+const getCategoryMeta = (catId: string): CategoryMeta => {
+  const palette = getCategoryPalette(catId);
+  const Icon = getCategoryIconComponent(catId);
+  return { ...palette, icon: <Icon size={16} color={palette.iconColor} /> };
 };
 
 type FilterTab = "all" | "highest" | "expiring";
 
 export default function OverviewScreen() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const {
     summary,
     categories,
@@ -156,14 +99,19 @@ export default function OverviewScreen() {
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
 
   useEffect(() => {
-    refreshAll();
-  }, [refreshAll]);
+    if (isAuthenticated) {
+      refreshAll();
+    }
+  }, [isAuthenticated, refreshAll]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await refreshAll(true);
-    setRefreshing(false);
+    try {
+      await refreshAll(true);
+    } finally {
+      setRefreshing(false);
+    }
   }, [refreshAll]);
 
   const unreadCount = useMemo(
@@ -214,6 +162,15 @@ export default function OverviewScreen() {
   const monthlyRedeemed = summary.monthlyRedeemed || 0;
   const expiringThisMonth = summary.expiringThisMonth || 0;
   const linkedCount = summary.linkedAccountsCount || 0;
+
+  if (!isAuthenticated) {
+    return (
+      <AuthRequiredView
+        title="Portfolio Analytics"
+        subtitle="Sign in to view your complete points breakdown, INR portfolio valuation, and interactive distribution charts."
+      />
+    );
+  }
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-[#F5FEFF]">

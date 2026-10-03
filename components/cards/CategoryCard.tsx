@@ -1,22 +1,9 @@
 // components/cards/CategoryCard.tsx – Matches Penpot All Category design
-import React from "react";
+import React, { memo } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
 import * as Haptics from "expo-haptics";
-import {
-  CreditCard,
-  Plane,
-  ShoppingBag,
-  Building2,
-  Utensils,
-  Fuel,
-  Sparkles,
-  ShoppingBasket,
-  Gift,
-  Tv,
-  Car,
-  Heart,
-} from "lucide-react-native";
 import { CategorySummary } from "../../types/loyalty";
+import { getCategoryIconComponent } from "../../constants/popularPrograms";
 
 interface CategoryCardProps {
   category: CategorySummary;
@@ -24,36 +11,14 @@ interface CategoryCardProps {
   onPress?: () => void;
 }
 
+/** Icon resolves through the ONE shared map (guardrails §3 — no screen-local switch). */
 const getCategoryIcon = (categoryId: string) => {
-  switch (categoryId) {
-    case "banking":
-      return <CreditCard size={17} color="#01A2FB" />;
-    case "airlines":
-      return <Plane size={17} color="#01A2FB" />;
-    case "shopping":
-      return <ShoppingBag size={17} color="#01A2FB" />;
-    case "hotels":
-      return <Building2 size={17} color="#01A2FB" />;
-    case "dining":
-      return <Utensils size={17} color="#01A2FB" />;
-    case "fuel":
-      return <Fuel size={17} color="#01A2FB" />;
-    case "groceries":
-    case "supermarket":
-      return <ShoppingBasket size={17} color="#01A2FB" />;
-    case "entertainment":
-      return <Tv size={17} color="#01A2FB" />;
-    case "travel":
-      return <Car size={17} color="#01A2FB" />;
-    case "health":
-    case "wellness":
-      return <Heart size={17} color="#01A2FB" />;
-    default:
-      return <Sparkles size={17} color="#01A2FB" />;
-  }
+  const Icon = getCategoryIconComponent(categoryId);
+  return <Icon size={17} color="#01A2FB" />;
 };
 
-export const CategoryCard: React.FC<CategoryCardProps> = ({
+// Memoized: rendered in category lists (guardrails §2).
+export const CategoryCard: React.FC<CategoryCardProps> = memo(({
   category,
   variant = "full",
   onPress,
@@ -158,5 +123,7 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({
       </Text>
     </TouchableOpacity>
   );
-};
+});
+
+CategoryCard.displayName = "CategoryCard";
 

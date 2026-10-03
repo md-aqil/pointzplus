@@ -1,42 +1,57 @@
 // components/cards/NotificationCard.tsx
-import React from "react";
+import React, { memo } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
-import { Gift, AlertTriangle, ArrowDownLeft, ArrowUpRight } from "lucide-react-native";
+import { Gift, AlertTriangle, ArrowDownLeft } from "lucide-react-native";
 import { NotificationItem } from "../../types/models";
+
+/** Stable point-count formatter (module scope: never allocate in render). */
+function formatPointsDelta(pointsDelta: number): string {
+  if (pointsDelta === 0) return "0 points";
+  const formatted = Math.abs(pointsDelta).toLocaleString();
+  return pointsDelta > 0 ? `+${formatted} points` : `-${formatted} points`;
+}
 
 interface NotificationCardProps {
   notification: NotificationItem;
   onPress?: () => void;
 }
 
-export const NotificationCard: React.FC<NotificationCardProps> = ({
+/** Pure, module-scope icon/colour config (no allocation per render). */
+function notificationIconConfig(type: NotificationItem["type"]) {
+  switch (type) {
+    case "credit":
+      return {
+        icon: <ArrowDownLeft size={18} color="#01A2FB" />,
+        bgColor: "#E6F6FF",
+        deltaColor: "text-primary-dark",
+      };
+    case "expiry":
+      return {
+        icon: <AlertTriangle size={18} color="#FF4343" />,
+        bgColor: "#FFF6F6",
+        deltaColor: "text-alert",
+      };
+    case "offer":
+      return {
+        icon: <Gift size={18} color="#9C4EBD" />,
+        bgColor: "#FDF4FF",
+        deltaColor: "text-violet",
+      };
+    default:
+      return {
+        icon: <Gift size={18} color="#9C4EBD" />,
+        bgColor: "#FDF4FF",
+        deltaColor: "text-violet",
+      };
+  }
+}
+
+// Memoized: rendered inside unbounded notification groups (guardrails §2).
+export const NotificationCard: React.FC<NotificationCardProps> = memo(({
   notification,
   onPress,
 }) => {
-  const getIcon = () => {
-    switch (notification.type) {
-      case "credit":
-        return {
-          icon: <ArrowDownLeft size={18} color="#01A2FB" />,
-          bgColor: "#E6F6FF",
-          deltaColor: "text-primary-dark",
-        };
-      case "expiry":
-        return {
-          icon: <AlertTriangle size={18} color="#FF4343" />,
-          bgColor: "#FFF6F6",
-          deltaColor: "text-alert",
-        };
-      case "offer":
-        return {
-          icon: <Gift size={18} color="#9C4EBD" />,
-          bgColor: "#FDF4FF",
-          deltaColor: "text-violet",
-        };
-    }
-  };
-
-  const config = getIcon();
+  const config = notificationIconConfig(notification.type);
 
   return (
     <TouchableOpacity
@@ -78,15 +93,13 @@ export const NotificationCard: React.FC<NotificationCardProps> = ({
           {notification.description}
         </Text>
 
-        {notification.pointsDelta && (
+        {notification.pointsDelta != null && notification.pointsDelta !== 0 && (
           <View className="mt-2 flex-row items-center">
             <Text
               style={{ fontFamily: "PlusJakartaSans-Bold" }}
               className={`text-xs ${config.deltaColor}`}
             >
-              {notification.pointsDelta > 0
-                ? `+${notification.pointsDelta.toLocaleString()} points`
-                : `${notification.pointsDelta.toLocaleString()} points`}
+              {formatPointsDelta(notification.pointsDelta)}
             </Text>
           </View>
         )}
@@ -97,4 +110,6 @@ export const NotificationCard: React.FC<NotificationCardProps> = ({
       )}
     </TouchableOpacity>
   );
-};
+});
+
+NotificationCard.displayName = "NotificationCard";

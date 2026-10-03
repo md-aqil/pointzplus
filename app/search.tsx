@@ -9,14 +9,27 @@ import { Input } from "../components/ui/Input";
 import { CategoryCard } from "../components/cards/CategoryCard";
 import { BrandPointCard } from "../components/cards/BrandPointCard";
 import { AccountStatementModal } from "../components/ui/AccountStatementModal";
+import { AuthRequiredView } from "../components/ui/AuthRequiredView";
 import { LinkedAccount } from "../types/loyalty";
 import { usePoints } from "../hooks/usePoints";
+import { useAuth } from "../hooks/useAuth";
 
 export default function SearchScreen() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const { accounts, categories } = usePoints();
   const [query, setQuery] = useState("");
   const [selectedAccount, setSelectedAccount] = useState<LinkedAccount | null>(null);
+
+  if (!isAuthenticated) {
+    return (
+      <AuthRequiredView
+        title="Search Programs"
+        subtitle="Sign in to search your linked accounts and explore loyalty catalogues."
+        showBack={true}
+      />
+    );
+  }
 
   const filteredCategories = categories.filter((c) =>
     c.categoryName.toLowerCase().includes(query.toLowerCase())

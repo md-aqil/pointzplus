@@ -385,7 +385,17 @@ class ApiClient {
     );
   }
 
-  async acknowledgeAlert(alertId: string) {
+  // ─── Notification batch acknowledge ────────────────────────────
+// One round-trip beats N per-item PUTs (guardrails §2/§4: no N+1 client calls).
+// Layer discipline: client → apiClient → route → controller → service → repo.
+async acknowledgeAllNotifications(): Promise<{ success: boolean; acknowledged: number }> {
+  return this.request<{ success: boolean; acknowledged: number }>(
+    '/notifications/acknowledge-all',
+    { method: 'PUT' }
+  );
+}
+
+async acknowledgeAlert(alertId: string) {
     return this.request<any>(`/notifications/acknowledge/${alertId}`, {
       method: 'PUT',
     });

@@ -103,6 +103,16 @@ export const NotificationsRepo = {
     ).then((r) => r.rows[0] || null);
   },
 
+  /** Batch mark-all-read: one UPDATE beats N per-item PUTs (client mark-all-read). */
+  acknowledgeAll(userId) {
+    return query(
+      `UPDATE expiry_alerts
+       SET acknowledged_by_user = true, acknowledged_at = NOW()
+       WHERE user_id = $1 AND acknowledged_by_user = false`,
+      [userId]
+    ).then((r) => r.rowCount ?? 0);
+  },
+
   /** Ownership check for client-reported alerts (prevents cross-user writes). */
   accountForUser(userId, accountId) {
     return query(

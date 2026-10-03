@@ -1,5 +1,5 @@
 // app/(tabs)/deals.tsx – Live Partner Deals, Coupons & Multiplier Offers
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -21,19 +21,18 @@ import {
   Sparkles,
   Tag,
   Gift,
-  Plane,
-  Building2,
-  ShoppingBag,
-  Utensils,
-  CreditCard,
   ChevronDown,
   ChevronUp,
   Zap,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import * as Clipboard from "expo-clipboard";
+import { useRouter } from "expo-router";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { apiClient } from "../../lib/apiClient";
+import { logger } from "../../lib/logger";
+import { getIconComponentByName } from "../../constants/popularPrograms";
+import { useAuth } from "../../hooks/useAuth";
 
 export interface DealItem {
   id: string;
@@ -54,6 +53,8 @@ export interface DealItem {
 }
 
 export default function DealsScreen() {
+  const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const [deals, setDeals] = useState<DealItem[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; icon: string }[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -64,6 +65,15 @@ export default function DealsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const [expandedTermsId, setExpandedTermsId] = useState<string | null>(null);
+
+  // Clear the "copied" reset timer on unmount (avoid setState after unmount).
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+    },
+    []
+  );
 
   useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
@@ -79,9 +89,7 @@ export default function DealsScreen() {
         if (active && Array.isArray(cats)) setCategories(cats);
       })
       .catch((err) => {
-        if (__DEV__) {
-          console.warn("[DealsScreen] Failed to load deal categories:", err?.message);
-        }
+        logger.warn("[DealsScreen] Failed to load deal categories:", err?.message);
       });
     return () => {
       active = false;
@@ -99,7 +107,7 @@ export default function DealsScreen() {
         setDeals(dealsRes.deals);
       }
     } catch (err) {
-      if (__DEV__) console.warn("Failed to fetch deals:", err);
+      logger.warn("Failed to fetch deals:", err);
     } finally {
       setIsLoading(false);
       setRefreshing(false);
@@ -122,8 +130,10 @@ export default function DealsScreen() {
     await Clipboard.setStringAsync(deal.code);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setCopiedCodeId(deal.id);
-    setTimeout(() => {
+    if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current);
+    copyResetTimerRef.current = setTimeout(() => {
       setCopiedCodeId(null);
+      copyResetTimerRef.current = null;
     }, 2500);
   };
 
@@ -131,28 +141,15 @@ export default function DealsScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (url && url !== "#") {
       Linking.openURL(url).catch((err) =>
-        console.warn("Could not open merchant URL:", err)
+        logger.warn("Could not open merchant URL:", err)
       );
     }
   };
 
   const renderCategoryIcon = (iconName: string, isSelected: boolean) => {
-    const color = isSelected ? "#FFFFFF" : "#6A6A74";
-    const size = 15;
-    switch (iconName) {
-      case "Plane":
-        return <Plane size={size} color={color} />;
-      case "ShoppingBag":
-        return <ShoppingBag size={size} color={color} />;
-      case "Building2":
-        return <Building2 size={size} color={color} />;
-      case "Utensils":
-        return <Utensils size={size} color={color} />;
-      case "CreditCard":
-        return <CreditCard size={size} color={color} />;
-      default:
-        return <Sparkles size={size} color={color} />;
-    }
+    // Resolve through the ONE shared icon map (guardrails §3 — no forked switch).
+    const Icon = getIconComponentByName(iconName);
+    return <Icon size={15} color={isSelected ? "#FFFFFF" : "#6A6A74"} />;
   };
 
   const featuredDeals = deals.filter((d) => d.featured);
@@ -174,6 +171,47 @@ export default function DealsScreen() {
           />
         }
       >
+        {/* Guest Callout Banner */}
+        {!isAuthenticated && (
+          <View className="mx-5 mt-2 mb-1 bg-[#070617] rounded-2xl p-3.5 border border-[#393845] flex-row items-center justify-between shadow-sm">
+            <View className="flex-row items-center flex-1 mr-3">
+              <View className="w-8 h-8 rounded-xl bg-[#02EFF4]/20 items-center justify-center mr-2.5">
+                <Sparkles size={16} color="#02EFF4" />
+              </View>
+              <View className="flex-1">
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                  className="text-xs text-white"
+                >
+                  Browsing as Guest
+                </Text>
+                <Text
+                  style={{ fontFamily: "PlusJakartaSans-Regular" }}
+                  className="text-[11px] text-[#9C9BA2]"
+                  numberOfLines={1}
+                >
+                  Sign in to track points & activate multipliers
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push("/(auth)/sign-in");
+              }}
+              activeOpacity={0.8}
+              className="bg-[#02EFF4] px-3.5 py-1.5 rounded-xl"
+            >
+              <Text
+                style={{ fontFamily: "PlusJakartaSans-Bold" }}
+                className="text-[11px] text-[#070617]"
+              >
+                Sign In
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Search Input – Clean, spacious & rounded */}
         <View className="px-5 pt-2 pb-3">
           <View className="flex-row items-center bg-[#F4F9FC] rounded-2xl px-4 py-3 border border-[#E2EEF5]">

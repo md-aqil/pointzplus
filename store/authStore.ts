@@ -17,7 +17,7 @@ interface AuthState {
   updateProfile: (data: Partial<UserProfile>) => void;
 }
 
-function formatNameFromEmail(email: string): string {
+export function formatNameFromEmail(email: string): string {
   const prefix = email.split("@")[0];
   return prefix
     .split(/[._-]/)

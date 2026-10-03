@@ -13,7 +13,7 @@ import { Lock, ShieldCheck, ArrowRight } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
-import { PasswordChecklist } from "../../components/ui/PasswordChecklist";
+import { PasswordChecklist, isStrongPassword } from "../../components/ui/PasswordChecklist";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 
 export default function ResetPasswordScreen() {
@@ -24,11 +24,7 @@ export default function ResetPasswordScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const isPasswordValid =
-    newPassword.length >= 8 &&
-    /[0-9]/.test(newPassword) &&
-    /[A-Z]/.test(newPassword) &&
-    /[^A-Za-z0-9]/.test(newPassword);
+  const isPasswordValid = isStrongPassword(newPassword);
 
   const handleUpdatePassword = () => {
     if (!isPasswordValid) {

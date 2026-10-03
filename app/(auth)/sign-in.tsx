@@ -137,6 +137,7 @@ export default function SignInScreen() {
                     fontSize: 15,
                     color: "#070617",
                     padding: 0,
+                    ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                   }}
                   value={email}
                   onChangeText={(text) => {
@@ -182,6 +183,7 @@ export default function SignInScreen() {
                     color: "#070617",
                     flex: 1,
                     padding: 0,
+                    ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                   }}
                   value={password}
                   onChangeText={(text) => {

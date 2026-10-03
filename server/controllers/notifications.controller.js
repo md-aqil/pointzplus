@@ -44,6 +44,10 @@ export const notificationsController = {
     res.json(await notificationsService.acknowledge(req.userId, req.params.id));
   }),
 
+  acknowledgeAll: asyncHandler(async (req, res) => {
+    res.json(await notificationsService.acknowledgeAll(req.userId));
+  }),
+
   recordAlert: asyncHandler(async (req, res) => {
     res.json(await notificationsService.recordAlert(req.userId, req.body));
   }),

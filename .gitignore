@@ -46,3 +46,8 @@ server/.env.*
 # generated native folders
 /ios
 /android
+
+# AI Code Review temporary files
+.ai-code-review/
+.agents/
+.vscode/

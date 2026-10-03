@@ -19,6 +19,7 @@ import {
 } from "../types/models";
 import { POPULAR_PROGRAMS, CATEGORY_LABELS } from "../constants/popularPrograms";
 import { apiClient } from "../lib/apiClient";
+import { logger } from "../lib/logger";
 import { notifyPointsEarned } from "../services/pushNotifications";
 
 // ─── Gmail sync job polling ────────────────────────────────────
@@ -147,20 +148,25 @@ async function pollSyncJob(
     try {
       job = await apiClient.getSyncJob(jobId);
     } catch (fetchErr: any) {
-      console.warn(`[pollSyncJob] Poll attempt failed for job ${jobId}:`, fetchErr?.message);
+      logger.warn(`[pollSyncJob] Poll attempt failed for job ${jobId}:`, fetchErr?.message);
       // A transient network blip must not abandon a scan that is still running.
       await delay(SYNC_JOB_POLL_INTERVAL_MS);
       continue;
     }
 
-    console.log(`[pollSyncJob] Job ${jobId} status: ${job.status}, messages: ${job.messages_processed ?? 0}/${job.total_messages_found ?? 0}`);
+    // 2s-poll status log — strictly gated behind __DEV__ so prod stays quiet (guardrails §4).
+    if (__DEV__) {
+      logger.log(`[pollSyncJob] Job ${jobId} status: ${job.status}, messages: ${job.messages_processed ?? 0}/${job.total_messages_found ?? 0}`);
+    }
 
     if (job.status === "failed") {
-      console.error(`[pollSyncJob] Job ${jobId} failed:`, job.error_details);
+      logger.error(`[pollSyncJob] Job ${jobId} failed:`, job.error_details);
       throw new Error(job.error_details || "Gmail sync failed. Please try again.");
     }
     if (job.status === "completed") {
-      console.log(`[pollSyncJob] Job ${jobId} completed successfully!`);
+      if (__DEV__) {
+        logger.log(`[pollSyncJob] Job ${jobId} completed successfully!`);
+      }
       return job;
     }
 
@@ -178,7 +184,7 @@ async function pollSyncJob(
   }
 
   // Poll window expired: only return if the job reached a completed terminal state
-  console.warn(`[pollSyncJob] Job ${jobId} reached polling threshold; checking final state`);
+  logger.warn(`[pollSyncJob] Job ${jobId} reached polling threshold; checking final state`);
   const finalJob = await apiClient.getSyncJob(jobId).catch(() => null);
   if (finalJob?.status === "completed") {
     return finalJob;
@@ -243,6 +249,8 @@ interface PointsState {
   fetchPortfolioFromBackend: (force?: boolean) => Promise<void>;
   fetchNotificationsFromBackend: (force?: boolean) => Promise<void>;
   acknowledgeNotification: (id: string) => Promise<void>;
+  /** Mark every loaded alert read in one batch round-trip. Returns count marked. */
+  acknowledgeAllNotifications: () => Promise<number>;
   /**
    * Reload accounts + portfolio + notifications. Skips the network when the
    * last successful refresh is fresh, so mounting Home → Overview → Home
@@ -478,6 +486,26 @@ export const usePointsStore = create<PointsState>((set, get) => ({
     }
   },
 
+  // Batch mark-all-read in one round-trip (guardrails §2: no Promise.all N×fetch).
+  acknowledgeAllNotifications: async () => {
+    try {
+      const res = await apiClient.acknowledgeAllNotifications();
+      const count = Number(res?.acknowledged ?? 0);
+      set((state) => ({
+        notifications: state.notifications.map((notification) => ({
+          ...notification,
+          isRead: true,
+        })),
+      }));
+      // Re-sync notifications from backend to guarantee state consistency
+      await get().fetchNotificationsFromBackend(true);
+      return count;
+    } catch {
+      // Leave items unread so the user can retry.
+      return 0;
+    }
+  },
+
   addManualAccount: async ({
     programId,
     customName,
@@ -659,7 +687,7 @@ export const usePointsStore = create<PointsState>((set, get) => ({
       }
       return [];
     } catch (e) {
-      console.warn("[pointsStore] fetchParsedStatements error:", e);
+      logger.warn("[pointsStore] fetchParsedStatements error:", e);
       return [];
     }
   },

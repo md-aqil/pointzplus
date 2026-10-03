@@ -30,8 +30,10 @@ import {
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { ScreenHeader } from "../components/ui/ScreenHeader";
+import { AuthRequiredView } from "../components/ui/AuthRequiredView";
 import { usePointsStore } from "../store/pointsStore";
 import { usePoints } from "../hooks/usePoints";
+import { useAuth } from "../hooks/useAuth";
 import { RejectedEmail, ParsedEmailStatement } from "../types/models";
 
 type TabMode = "SKIPPED" | "PARSED";
@@ -95,6 +97,7 @@ function getCategoryIcon(category?: string) {
 
 export default function SyncRejectedScreen() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState<TabMode>("SKIPPED");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -112,12 +115,14 @@ export default function SyncRejectedScreen() {
 
   // Initial data load on mount
   useEffect(() => {
+    if (!isAuthenticated) return;
     fetchParsedStatements(300);
     checkActiveSyncStatus();
-  }, [fetchParsedStatements, checkActiveSyncStatus]);
+  }, [isAuthenticated, fetchParsedStatements, checkActiveSyncStatus]);
 
   // Adaptive polling: only poll while a sync / backfill job is actively running
   useEffect(() => {
+    if (!isAuthenticated) return;
     if (!isBackfillRunning && !isSyncing) return;
 
     const interval = setInterval(() => {
@@ -125,7 +130,17 @@ export default function SyncRejectedScreen() {
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [isBackfillRunning, isSyncing, checkActiveSyncStatus]);
+  }, [isAuthenticated, isBackfillRunning, isSyncing, checkActiveSyncStatus]);
+
+  if (!isAuthenticated) {
+    return (
+      <AuthRequiredView
+        title="Statement Diagnostics"
+        subtitle="Sign in to view parsed loyalty statements and skipped emails log."
+        showBack={true}
+      />
+    );
+  }
 
   const onRefresh = async () => {
     setRefreshing(true);

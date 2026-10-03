@@ -1,33 +1,41 @@
 // components/ui/PasswordChecklist.tsx
 import React from "react";
 import { View, Text } from "react-native";
-import { Check, X } from "lucide-react-native";
+import { Check } from "lucide-react-native";
 
 interface PasswordChecklistProps {
   password?: string;
 }
 
+export interface PasswordRule {
+  label: string;
+  valid: boolean;
+}
+
+// ─── Single source of truth for password rules (guardrails §3) ──────────────
+// Both the checklist UI and the auth screens (register/reset) derive from these
+// definitions — never re-declare regex arrays inside a screen.
+const RULE_DEFS: { label: string; test: (password: string) => boolean }[] = [
+  { label: "Use 8+ characters", test: (password) => password.length >= 8 },
+  { label: "At least one number", test: (password) => /[0-9]/.test(password) },
+  { label: "At least one uppercase letter", test: (password) => /[A-Z]/.test(password) },
+  { label: "At least one special character", test: (password) => /[^A-Za-z0-9]/.test(password) },
+];
+
+/** Evaluate each rule against a password (label + live validity). */
+export function getPasswordRules(password = ""): PasswordRule[] {
+  return RULE_DEFS.map(({ label, test }) => ({ label, valid: test(password) }));
+}
+
+/** True when every rule passes. */
+export function isStrongPassword(password = ""): boolean {
+  return RULE_DEFS.every(({ test }) => test(password));
+}
+
 export const PasswordChecklist: React.FC<PasswordChecklistProps> = ({
   password = "",
 }) => {
-  const rules = [
-    {
-      label: "Use 8+ characters",
-      valid: password.length >= 8,
-    },
-    {
-      label: "At least one number",
-      valid: /[0-9]/.test(password),
-    },
-    {
-      label: "At least one uppercase letter",
-      valid: /[A-Z]/.test(password),
-    },
-    {
-      label: "At least one special character",
-      valid: /[^A-Za-z0-9]/.test(password),
-    },
-  ];
+  const rules = getPasswordRules(password);
 
   return (
     <View className="w-full bg-white p-4 rounded-2xl border border-border-light my-2">

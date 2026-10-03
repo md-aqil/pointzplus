@@ -1,5 +1,5 @@
 // app/(tabs)/home.tsx – Pixel-perfect Home Dashboard with exact Penpot SVG background
-import React, { useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -14,24 +14,73 @@ import { LinearGradient } from "expo-linear-gradient";
 import {
   Bell,
   X,
-  CreditCard,
-  Plane,
-  ShoppingBag,
-  Building2,
-  Layers,
-  Utensils,
-  Fuel,
   Sparkles,
   ArrowRight,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { DashboardTopBg } from "../../components/ui/DashboardTopBg";
+import { AuthRequiredView } from "../../components/ui/AuthRequiredView";
 import { usePoints } from "../../hooks/usePoints";
 import { useAuth } from "../../hooks/useAuth";
+import { formatNameFromEmail } from "../../store/authStore";
+import {
+  CATEGORY_LABELS,
+  getCategoryIconComponent,
+} from "../../constants/popularPrograms";
+
+/** Category ids always shown in the home quick-nav, even with zero linked brands. */
+const FALLBACK_CATEGORY_IDS = [
+  "airlines",
+  "other",
+  "shopping",
+  "banking",
+  "hotels",
+  "dining",
+  "fuel",
+];
+
+/** Screen-local *palette* for the home quick-nav cards (Penpot variant). */
+function getQuickNavPalette(catId: string) {
+  switch (catId) {
+    case "airlines":
+      return { bgColor: "#FAF5FF", borderColor: "#F3E8FF", iconBg: "#A855F7" };
+    case "other":
+      return { bgColor: "#FDF4FF", borderColor: "#FAE8FF", iconBg: "#9C4EBD" };
+    case "shopping":
+    case "retail":
+      return { bgColor: "#F0FDFA", borderColor: "#CCFBF1", iconBg: "#2DD4BF" };
+    case "banking":
+      return { bgColor: "#F0FDFE", borderColor: "#D8F3F8", iconBg: "#38BDF8" };
+    case "hotels":
+      return { bgColor: "#FFFBEB", borderColor: "#FEF3C7", iconBg: "#F59E0B" };
+    case "dining":
+      return { bgColor: "#FFF1F2", borderColor: "#FFE4E6", iconBg: "#EF4444" };
+    case "fuel":
+      return { bgColor: "#FFF7ED", borderColor: "#FFEDD5", iconBg: "#F97316" };
+    default:
+      return { bgColor: "#F0FAFE", borderColor: "#DCF0FA", iconBg: "#01A2FB" };
+  }
+}
+
+/**
+ * Home quick-nav meta. Name comes from the canonical CATEGORY_LABELS and the
+ * glyph from the ONE shared icon map; only the Penpot palette stays local
+ * (guardrails §3 — no screen-local name/icon switches).
+ */
+function getCategoryMeta(catId: string) {
+  const Icon = getCategoryIconComponent(catId);
+  return {
+    name:
+      CATEGORY_LABELS[catId]?.name ||
+      catId.charAt(0).toUpperCase() + catId.slice(1),
+    ...getQuickNavPalette(catId),
+    icon: <Icon size={20} color="#FFFFFF" />,
+  };
+}
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const {
     summary,
     categories,
@@ -46,131 +95,94 @@ export default function HomeScreen() {
   const [showTooltip, setShowTooltip] = useState(false);
 
   React.useEffect(() => {
-    refreshAll();
-  }, []);
+    if (isAuthenticated) {
+      refreshAll();
+    }
+  }, [isAuthenticated]);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await refreshAll(true);
-    setRefreshing(false);
-  };
+    try {
+      await refreshAll(true);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshAll]);
 
   const displayName =
-    user?.name || (user?.email ? user.email.split("@")[0] : "Guest");
+    user?.name || (user?.email ? formatNameFromEmail(user.email) : "Guest");
   const avatarUrl = user?.avatarUrl;
   const avatarInitial = displayName.charAt(0).toUpperCase();
 
   // Accounts whose points expire within the 30-day dashboard window
-  const soonExpiring = expiringAccounts.filter((acc) => {
-    if (!acc.expiryDate) return true;
-    const t = new Date(acc.expiryDate).getTime();
-    return !isNaN(t) && t <= Date.now() + 30 * 24 * 60 * 60 * 1000;
-  });
+  const soonExpiring = useMemo(
+    () =>
+      expiringAccounts.filter((acc) => {
+        if (!acc.expiryDate) return true;
+        const t = new Date(acc.expiryDate).getTime();
+        return !isNaN(t) && t <= Date.now() + 30 * 24 * 60 * 60 * 1000;
+      }),
+    [expiringAccounts]
+  );
 
   // Recently discovered/updated loyalty accounts (newest first)
-  const latestDiscovered = [...accounts]
-    .sort((a, b) => new Date(b.lastSyncedAt || 0).getTime() - new Date(a.lastSyncedAt || 0).getTime())
-    .slice(0, 3);
+  const latestDiscovered = useMemo(
+    () =>
+      [...accounts]
+        .sort(
+          (a, b) =>
+            new Date(b.lastSyncedAt || 0).getTime() -
+            new Date(a.lastSyncedAt || 0).getTime()
+        )
+        .slice(0, 3),
+    [accounts]
+  );
 
   // Real brand counts per category for the quick-nav cards
-  const categoryBrandCounts: Record<string, number> = {};
-  categories.forEach((c) => {
-    categoryBrandCounts[c.categoryId] = c.brandCount;
-  });
+  const categoryBrandCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    categories.forEach((c) => {
+      counts[c.categoryId] = c.brandCount;
+    });
+    return counts;
+  }, [categories]);
 
-  const getCategoryMeta = (catId: string) => {
-    switch (catId) {
-      case "airlines":
-        return {
-          name: "Airlines",
-          bgColor: "#FAF5FF",
-          borderColor: "#F3E8FF",
-          iconBg: "#A855F7",
-          icon: <Plane size={20} color="#FFFFFF" />,
-        };
-      case "other":
-        return {
-          name: "Growth & Other",
-          bgColor: "#FDF4FF",
-          borderColor: "#FAE8FF",
-          iconBg: "#9C4EBD",
-          icon: <Layers size={20} color="#FFFFFF" />,
-        };
-      case "shopping":
-      case "retail":
-        return {
-          name: "Shopping",
-          bgColor: "#F0FDFA",
-          borderColor: "#CCFBF1",
-          iconBg: "#2DD4BF",
-          icon: <ShoppingBag size={20} color="#FFFFFF" />,
-        };
-      case "banking":
-        return {
-          name: "Banking & Cards",
-          bgColor: "#F0FDFE",
-          borderColor: "#D8F3F8",
-          iconBg: "#38BDF8",
-          icon: <CreditCard size={20} color="#FFFFFF" />,
-        };
-      case "hotels":
-        return {
-          name: "Hotels",
-          bgColor: "#FFFBEB",
-          borderColor: "#FEF3C7",
-          iconBg: "#F59E0B",
-          icon: <Building2 size={20} color="#FFFFFF" />,
-        };
-      case "dining":
-        return {
-          name: "Dining Out",
-          bgColor: "#FFF1F2",
-          borderColor: "#FFE4E6",
-          iconBg: "#EF4444",
-          icon: <Utensils size={20} color="#FFFFFF" />,
-        };
-      case "fuel":
-        return {
-          name: "Fuel & Mobility",
-          bgColor: "#FFF7ED",
-          borderColor: "#FFEDD5",
-          iconBg: "#F97316",
-          icon: <Fuel size={20} color="#FFFFFF" />,
-        };
-      default:
-        return {
-          name: catId.charAt(0).toUpperCase() + catId.slice(1),
-          bgColor: "#F0FAFE",
-          borderColor: "#DCF0FA",
-          iconBg: "#01A2FB",
-          icon: <Layers size={20} color="#FFFFFF" />,
-        };
-    }
-  };
+  // Ordered dynamic categories: active-with-points first, then the static fallback set.
+  const orderedCategoryIds = useMemo(() => {
+    const activeCategoryIds = categories
+      .filter((c) => (c.brandCount || 0) > 0)
+      .map((c) => c.categoryId);
+    return Array.from(new Set([...activeCategoryIds, ...FALLBACK_CATEGORY_IDS]));
+  }, [categories]);
 
-  // Build ordered dynamic categories list: prioritize active categories with points
-  const activeCategoryIds = categories
-    .filter((c) => (c.brandCount || 0) > 0)
-    .map((c) => c.categoryId);
+  const categoriesList = useMemo(
+    () =>
+      orderedCategoryIds.map((catId) => {
+        const meta = getCategoryMeta(catId);
+        const count = categoryBrandCounts[catId] ?? 0;
+        return {
+          id: catId,
+          name: meta.name,
+          subtext: `${count} ${count === 1 ? "brand" : "brands"}`,
+          bgColor: meta.bgColor,
+          borderColor: meta.borderColor,
+          iconBg: meta.iconBg,
+          icon: meta.icon,
+          route: `/category/${catId}`,
+        };
+      }),
+    [orderedCategoryIds, categoryBrandCounts]
+  );
 
-  const fallbackCategoryIds = ["airlines", "other", "shopping", "banking", "hotels", "dining", "fuel"];
-  const orderedCategoryIds = Array.from(new Set([...activeCategoryIds, ...fallbackCategoryIds]));
-
-  const categoriesList = orderedCategoryIds.map((catId) => {
-    const meta = getCategoryMeta(catId);
-    const count = categoryBrandCounts[catId] ?? 0;
-    return {
-      id: catId,
-      name: meta.name,
-      subtext: `${count} ${count === 1 ? "brand" : "brands"}`,
-      bgColor: meta.bgColor,
-      borderColor: meta.borderColor,
-      iconBg: meta.iconBg,
-      icon: meta.icon,
-      route: `/category/${catId}`,
-    };
-  });
+  if (!isAuthenticated) {
+    return (
+      <AuthRequiredView
+        title="Welcome to PointzPlus"
+        subtitle="Sign in to track balances across 20+ airline, hotel, and shopping loyalty programs in one unified dashboard."
+      />
+    );
+  }
 
   return (
     <View className="flex-1 bg-[#F8FAFC]">

@@ -7,6 +7,7 @@ export function useAuth() {
   const isLoading = useAuthStore((state) => state.isLoading);
   const rememberMe = useAuthStore((state) => state.rememberMe);
   const signIn = useAuthStore((state) => state.signIn);
+  const register = useAuthStore((state) => state.register);
   const signOut = useAuthStore((state) => state.signOut);
   const updateProfile = useAuthStore((state) => state.updateProfile);
   const setRememberMe = useAuthStore((state) => state.setRememberMe);
@@ -16,6 +17,7 @@ export function useAuth() {
     isAuthenticated,
     isLoading,
     signIn,
+    register,
     signOut,
     updateProfile,
     rememberMe,

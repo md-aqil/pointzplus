@@ -22,13 +22,24 @@ import {
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
+import { AuthRequiredView } from "../../components/ui/AuthRequiredView";
 import { useAuth } from "../../hooks/useAuth";
 import { usePoints } from "../../hooks/usePoints";
+import { formatNameFromEmail } from "../../store/authStore";
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAuthenticated } = useAuth();
   const { emailAccounts, summary } = usePoints();
+
+  if (!isAuthenticated) {
+    return (
+      <AuthRequiredView
+        title="Account & Settings"
+        subtitle="Sign in to manage your connected Gmail accounts, notification preferences, and security settings."
+      />
+    );
+  }
 
   const handleSignOut = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -57,7 +68,7 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const displayName = user?.name || (user?.email ? user.email.split("@")[0] : "User");
+  const displayName = user?.name || (user?.email ? formatNameFromEmail(user.email) : "User");
   const displayEmail = user?.email || "";
   const displayPhone = user?.phone ? user.phone : "Add phone number";
 

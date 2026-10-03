@@ -17,17 +17,19 @@ import { User, Pencil, Eye, EyeOff } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { Button } from "../../components/ui/Button";
+import { PasswordChecklist, isStrongPassword } from "../../components/ui/PasswordChecklist";
 import { useAuth } from "../../hooks/useAuth";
 import { apiClient } from "../../lib/apiClient";
+import { formatNameFromEmail } from "../../store/authStore";
 
 export default function ProfileSettingsScreen() {
   const router = useRouter();
   const { user, updateProfile } = useAuth();
 
-  // Parse first and last names
-  const initialFullName = user?.name || "";
-  const nameParts = initialFullName.split(" ");
-  const initialFirst = nameParts[0] || (user?.email ? user.email.split("@")[0] : "");
+  // Parse first and last names cleanly (derives full name from email if name is unset)
+  const initialFullName = user?.name || (user?.email ? formatNameFromEmail(user.email) : "");
+  const nameParts = initialFullName.trim().split(/\s+/).filter(Boolean);
+  const initialFirst = nameParts[0] || "";
   const initialLast = nameParts.slice(1).join(" ") || "";
 
   const [firstName, setFirstName] = useState(initialFirst);
@@ -41,10 +43,20 @@ export default function ProfileSettingsScreen() {
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
-    if (password && confirmPassword && password !== confirmPassword) {
-      Alert.alert("Password Mismatch", "Passwords do not match. Please try again.");
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return;
+    if (password) {
+      if (!isStrongPassword(password)) {
+        Alert.alert(
+          "Weak Password",
+          "Please fulfill all password security requirements before saving."
+        );
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        return;
+      }
+      if (password !== confirmPassword) {
+        Alert.alert("Password Mismatch", "Passwords do not match. Please try again.");
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        return;
+      }
     }
 
     const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
@@ -58,16 +70,20 @@ export default function ProfileSettingsScreen() {
       Alert.alert("Success", "Profile updated successfully!", [
         { text: "OK", onPress: () => router.back() },
       ]);
-    } catch {
+    } catch (err) {
+      // Never fake success: surface the real failure and keep local state intact.
       setSaving(false);
-      updateProfile({ name: fullName, phone });
-      Alert.alert("Saved", "Profile information updated successfully.", [
-        { text: "OK", onPress: () => router.back() },
-      ]);
+      Alert.alert(
+        "Update failed",
+        err instanceof Error && err.message
+          ? err.message
+          : "Could not save your profile. Please try again."
+      );
     }
   };
 
-  const displayName = `${firstName.trim()} ${lastName.trim()}`.trim() || "Davinder singh";
+  const displayName =
+    `${firstName.trim()} ${lastName.trim()}`.trim() || user?.email || "Your profile";
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-white">
@@ -146,6 +162,7 @@ export default function ProfileSettingsScreen() {
                   fontSize: 14,
                   color: "#1A1926",
                   padding: 0,
+                  ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                 }}
                 value={firstName}
                 onChangeText={setFirstName}
@@ -170,6 +187,7 @@ export default function ProfileSettingsScreen() {
                   fontSize: 14,
                   color: "#1A1926",
                   padding: 0,
+                  ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                 }}
                 value={lastName}
                 onChangeText={setLastName}
@@ -194,6 +212,7 @@ export default function ProfileSettingsScreen() {
                   fontSize: 14,
                   color: "#1A1926",
                   padding: 0,
+                  ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                 }}
                 value={email}
                 onChangeText={setEmail}
@@ -220,6 +239,7 @@ export default function ProfileSettingsScreen() {
                   fontSize: 14,
                   color: "#1A1926",
                   padding: 0,
+                  ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                 }}
                 value={phone}
                 onChangeText={setPhone}
@@ -257,6 +277,7 @@ export default function ProfileSettingsScreen() {
                   fontSize: 14,
                   color: "#1A1926",
                   padding: 0,
+                  ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                 }}
                 value={password}
                 onChangeText={setPassword}
@@ -294,6 +315,7 @@ export default function ProfileSettingsScreen() {
                   fontSize: 14,
                   color: "#1A1926",
                   padding: 0,
+                  ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                 }}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
@@ -314,6 +336,12 @@ export default function ProfileSettingsScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {password.length > 0 && (
+            <View className="mb-4">
+              <PasswordChecklist password={password} />
+            </View>
+          )}
 
           {/* Divider 3 */}
           <View className="h-[1px] bg-[#EEEEF2] my-5" />

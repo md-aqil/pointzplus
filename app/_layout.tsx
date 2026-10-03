@@ -17,6 +17,7 @@ import {
 } from "@expo-google-fonts/plus-jakarta-sans";
 import { apiClient } from "../lib/apiClient";
 import { useAuthStore } from "../store/authStore";
+import { useAuth } from "../hooks/useAuth";
 import {
   checkAndTriggerExpiryAlerts,
   registerForPushNotifications,
@@ -79,7 +80,7 @@ export default function RootLayout() {
   }, [fontsLoaded, fontError]);
 
   const router = useRouter();
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const { isAuthenticated } = useAuth();
   const pushInitialized = useRef(false);
 
   // Re-validate persisted session on every cold start

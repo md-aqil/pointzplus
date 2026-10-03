@@ -6,6 +6,7 @@ import {
   Text,
   TouchableOpacity,
   TextInputProps,
+  Platform,
 } from "react-native";
 import { Eye, EyeOff } from "lucide-react-native";
 
@@ -70,6 +71,7 @@ export const Input: React.FC<InputProps> = ({
             fontSize: 14,
             color: "#070617",
             padding: 0,
+            ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
           }}
           placeholderTextColor="#9C9BA2"
           secureTextEntry={isPassword && !showPassword}

@@ -15,10 +15,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Eye, EyeOff, Check } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { PointzPlusLogo } from "../../components/ui/PointzPlusLogo";
-import { useAuthStore } from "../../store/authStore";
+import { getPasswordRules, isStrongPassword } from "../../components/ui/PasswordChecklist";
+import { useAuth } from "../../hooks/useAuth";
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const { register } = useAuth();
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -30,17 +32,9 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const passwordRules = [
-    { label: "Use 8+ characters", valid: password.length >= 8 },
-    { label: "At least one number", valid: /[0-9]/.test(password) },
-    { label: "At least one uppercase letter", valid: /[A-Z]/.test(password) },
-    {
-      label: "At least one special character",
-      valid: /[^A-Za-z0-9]/.test(password),
-    },
-  ];
+  const passwordRules = getPasswordRules(password);
 
-  const isPasswordValid = passwordRules.every((r) => r.valid);
+  const isPasswordValid = isStrongPassword(password);
 
   const handleRegister = async () => {
     if (!firstName.trim()) {
@@ -72,7 +66,7 @@ export default function RegisterScreen() {
 
     try {
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
-      await useAuthStore.getState().register(email.trim(), password, fullName);
+      await register(email.trim(), password, fullName);
       setLoading(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(tabs)/home");
@@ -173,6 +167,7 @@ export default function RegisterScreen() {
                       fontSize: 14,
                       color: "#070617",
                       padding: 0,
+                      ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                     }}
                     value={firstName}
                     onChangeText={(text) => {
@@ -215,6 +210,7 @@ export default function RegisterScreen() {
                       fontSize: 14,
                       color: "#070617",
                       padding: 0,
+                      ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                     }}
                     value={lastName}
                     onChangeText={(text) => {
@@ -258,6 +254,7 @@ export default function RegisterScreen() {
                     fontSize: 14,
                     color: "#070617",
                     padding: 0,
+                    ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                   }}
                   value={email}
                   onChangeText={(text) => {
@@ -303,6 +300,7 @@ export default function RegisterScreen() {
                     color: "#070617",
                     flex: 1,
                     padding: 0,
+                    ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                   }}
                   value={password}
                   onChangeText={(text) => {
@@ -404,6 +402,7 @@ export default function RegisterScreen() {
                     color: "#070617",
                     flex: 1,
                     padding: 0,
+                    ...(Platform.OS === "web" ? { outlineStyle: "none" as any } : {}),
                   }}
                   value={confirmPassword}
                   onChangeText={(text) => {

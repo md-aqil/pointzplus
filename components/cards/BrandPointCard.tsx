@@ -1,7 +1,6 @@
 // components/cards/BrandPointCard.tsx – Works with LinkedAccount from pointsStore
-import React from "react";
+import React, { memo } from "react";
 import { View, Text, TouchableOpacity } from "react-native";
-import { Clock } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { LinkedAccount } from "../../types/loyalty";
 
@@ -10,7 +9,8 @@ interface BrandPointCardProps {
   onPress?: () => void;
 }
 
-export const BrandPointCard: React.FC<BrandPointCardProps> = ({
+// Memoized: rendered in lists (search results, category brand lists) — guardrails §2.
+export const BrandPointCard: React.FC<BrandPointCardProps> = memo(({
   account,
   onPress,
 }) => {
@@ -73,4 +73,6 @@ export const BrandPointCard: React.FC<BrandPointCardProps> = ({
       </View>
     </TouchableOpacity>
   );
-};
+});
+
+BrandPointCard.displayName = "BrandPointCard";

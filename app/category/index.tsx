@@ -5,11 +5,24 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenHeader } from "../../components/ui/ScreenHeader";
 import { CategoryCard } from "../../components/cards/CategoryCard";
+import { AuthRequiredView } from "../../components/ui/AuthRequiredView";
 import { usePoints } from "../../hooks/usePoints";
+import { useAuth } from "../../hooks/useAuth";
 
 export default function AllCategoriesScreen() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const { categories } = usePoints();
+
+  if (!isAuthenticated) {
+    return (
+      <AuthRequiredView
+        title="Explore Categories"
+        subtitle="Sign in to view your category points breakdown across airline, hotel, banking, and shopping programs."
+        showBack={true}
+      />
+    );
+  }
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">

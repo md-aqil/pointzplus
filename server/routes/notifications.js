@@ -34,6 +34,7 @@ router.post('/token', authenticate, validate(tokenSchema), notificationsControll
 router.post('/alert', authenticate, validate(clientAlertSchema), notificationsController.recordAlert);
 router.get('/expiry', authenticate, notificationsController.expiringAlerts);
 router.get('/history', authenticate, notificationsController.history);
+router.put('/acknowledge-all', authenticate, notificationsController.acknowledgeAll);
 router.put('/acknowledge/:id', authenticate, notificationsController.acknowledge);
 router.post('/check-expiry', notificationsController.checkExpiry);
 

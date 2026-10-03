@@ -6,30 +6,34 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   ArrowLeft,
   Search,
-  Plane,
-  Building2,
-  ShoppingBag,
-  Utensils,
-  CreditCard,
-  Fuel,
-  Film,
-  HeartPulse,
-  Radio,
-  Layers,
   Sparkles,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { BrandPointCard } from "../../components/cards/BrandPointCard";
 import { AccountStatementModal } from "../../components/ui/AccountStatementModal";
+import { AuthRequiredView } from "../../components/ui/AuthRequiredView";
 import { CATEGORIES } from "../../constants/categories";
+import { getCategoryIconComponent } from "../../constants/popularPrograms";
 import { usePoints } from "../../hooks/usePoints";
+import { useAuth } from "../../hooks/useAuth";
 import { LinkedAccount } from "../../types/loyalty";
 
 export default function CategoryDetailScreen() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const { id } = useLocalSearchParams();
   const { accounts, categories } = usePoints();
   const [selectedAccount, setSelectedAccount] = useState<LinkedAccount | null>(null);
+
+  if (!isAuthenticated) {
+    return (
+      <AuthRequiredView
+        title="Category Details"
+        subtitle="Sign in to view your accounts and points balances in this category."
+        showBack={true}
+      />
+    );
+  }
 
   const categoryId = (typeof id === "string" ? id : "airlines").toLowerCase();
   const staticCategory =
@@ -52,31 +56,9 @@ export default function CategoryDetailScreen() {
   const expiringTotal = categoryAccounts.reduce((sum, a) => sum + (a.expiringPoints || 0), 0) || (summaryCategory ? summaryCategory.expiringPoints : 0);
 
   const renderCategoryIcon = () => {
-    const iconSize = 22;
-    const iconColor = "#FFFFFF";
-    switch (categoryId) {
-      case "airlines":
-        return <Plane size={iconSize} color={iconColor} />;
-      case "hotels":
-        return <Building2 size={iconSize} color={iconColor} />;
-      case "shopping":
-      case "retail":
-        return <ShoppingBag size={iconSize} color={iconColor} />;
-      case "dining":
-        return <Utensils size={iconSize} color={iconColor} />;
-      case "banking":
-        return <CreditCard size={iconSize} color={iconColor} />;
-      case "fuel":
-        return <Fuel size={iconSize} color={iconColor} />;
-      case "entertainment":
-        return <Film size={iconSize} color={iconColor} />;
-      case "health":
-        return <HeartPulse size={iconSize} color={iconColor} />;
-      case "telecom":
-        return <Radio size={iconSize} color={iconColor} />;
-      default:
-        return <Layers size={iconSize} color={iconColor} />;
-    }
+    // One shared icon map — never a screen-local switch (guardrails §3).
+    const Icon = getCategoryIconComponent(categoryId);
+    return <Icon size={22} color="#FFFFFF" />;
   };
 
   return (

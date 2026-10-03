@@ -1,5 +1,5 @@
 // app/notifications.tsx – All & Unread Notifications matching Penpot Design
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -7,20 +7,25 @@ import { Bell, CheckCheck } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { ScreenHeader } from "../components/ui/ScreenHeader";
 import { NotificationCard } from "../components/cards/NotificationCard";
+import { AuthRequiredView } from "../components/ui/AuthRequiredView";
 import { usePoints } from "../hooks/usePoints";
+import { useAuth } from "../hooks/useAuth";
 
 export default function NotificationsScreen() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const {
     notifications,
     fetchNotificationsFromBackend,
     acknowledgeNotification,
+    acknowledgeAllNotifications,
   } = usePoints();
   const [tab, setTab] = useState<"all" | "unread">("all");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     let active = true;
     fetchNotificationsFromBackend().finally(() => {
       if (active) setLoading(false);
@@ -28,30 +33,82 @@ export default function NotificationsScreen() {
     return () => {
       active = false;
     };
-  }, [fetchNotificationsFromBackend]);
+  }, [isAuthenticated, fetchNotificationsFromBackend]);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchNotificationsFromBackend();
     setRefreshing(false);
-  };
+  }, [fetchNotificationsFromBackend]);
 
-  const markAllRead = async () => {
-    const unread = notifications.filter((notification) => !notification.isRead);
-    await Promise.all(
-      unread.map((notification) => acknowledgeNotification(notification.id))
+  // Single batch round-trip (guardrails §2: no Promise.all N×acknowledge).
+  const markAllRead = useCallback(async () => {
+    const marked = await acknowledgeAllNotifications();
+    if (marked > 0) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, [acknowledgeAllNotifications]);
+
+  // Stable per-id press handlers so the memo'd NotificationCard isn't invalidated
+  // by a fresh lambda on every parent render.
+  const acknowledgeRef = useRef(acknowledgeNotification);
+  acknowledgeRef.current = acknowledgeNotification;
+  const pressHandlersRef = useRef(new Map<string, () => void>());
+
+  // Evict removed notification IDs and clear the map on unmount to prevent memory leaks.
+  useEffect(() => {
+    const validIds = new Set(notifications.map((n) => n.id));
+    for (const key of pressHandlersRef.current.keys()) {
+      if (!validIds.has(key)) {
+        pressHandlersRef.current.delete(key);
+      }
+    }
+  }, [notifications]);
+
+  useEffect(() => {
+    return () => {
+      pressHandlersRef.current.clear();
+    };
+  }, []);
+
+  const getPressHandler = useCallback((id: string) => {
+    let handler = pressHandlersRef.current.get(id);
+    if (!handler) {
+      handler = () => void acknowledgeRef.current(id);
+      pressHandlersRef.current.set(id, handler);
+    }
+    return handler;
+  }, []);
+
+  const unreadCount = useMemo(
+    () => notifications.filter((notification) => !notification.isRead).length,
+    [notifications]
+  );
+  const displayedNotifications = useMemo(
+    () =>
+      tab === "all"
+        ? notifications
+        : notifications.filter((notification) => !notification.isRead),
+    [notifications, tab]
+  );
+  const groups = useMemo(() => {
+    const acc: Record<string, typeof notifications> = {};
+    displayedNotifications.forEach((notification) => {
+      if (!acc[notification.dateGroup]) acc[notification.dateGroup] = [];
+      acc[notification.dateGroup].push(notification);
+    });
+    return acc;
+  }, [displayedNotifications]);
+
+  if (!isAuthenticated) {
+    return (
+      <AuthRequiredView
+        title="Expiry & Sync Alerts"
+        subtitle="Sign in to receive instant alerts when your loyalty points are close to expiring."
+        showBack={true}
+      />
     );
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
-  const unreadCount = notifications.filter((notification) => !notification.isRead).length;
-  const displayedNotifications =
-    tab === "all" ? notifications : notifications.filter((notification) => !notification.isRead);
-  const groups: Record<string, typeof notifications> = {};
-  displayedNotifications.forEach((notification) => {
-    if (!groups[notification.dateGroup]) groups[notification.dateGroup] = [];
-    groups[notification.dateGroup].push(notification);
-  });
+  }
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-light-bg">
@@ -156,7 +213,7 @@ export default function NotificationsScreen() {
                     onPress={
                       notification.isRead
                         ? undefined
-                        : () => void acknowledgeNotification(notification.id)
+                        : getPressHandler(notification.id)
                     }
                   />
                 ))}
